@@ -168,88 +168,16 @@ class StoGANModel(BaseModel):
 
 
     def get_encoded(self):
-    
         return self.netE(self.real_A)
 
-    def get_decoded(self, latent, SNR=None):
-        
-        if SNR is None:
-            self.fake = self.netG(latent)
-        else:
-            sigma = 1/np.sqrt(10**(0.1*SNR))
-            noise = sigma * torch.randn_like(latent)
-            if self.is_Normalize:
-                latent_input = self.normalize(latent+noise, 1)
-            else:
-                latent_input = latent+noise
-            self.fake = self.netG(latent_input)
+    def get_decoded(self, latent):
+        if self.opt.channel == 'awgn':   # AWGN channel
+            self.latent = self.normalize(latent, 1)
+        elif self.opt.channel == 'bsc':   # BSC channel
+            self.latent = torch.sigmoid(latent)
 
-        return self.fake
+        # 2. Pass the channel
+        latent_input = self.channel(self.latent)
 
-    def get_losses(self):
-
-        self.loss_G_L1 = self.criterionL1(self.fake, self.real_B) * self.opt.lambda_L1
-        self.loss_G_L2 = self.criterionL2(self.fake, self.real_B) * self.opt.lambda_L2
-
-        return self.loss_G_L1, self.loss_G_L2
-
-    def update_SNR(self, epoch):
-        """Update learning rates for all the networks; called at the end of every epoch"""
-        
-        if epoch < self.opt.n_epochs:
-            self.sigma += self.sigma_step
-        print('Noise pwr = %.7f' % self.sigma)
-#    def forward(self, label, image, infer=False, ADMM=False, SNR=None):
-#        # Encode Inputs
-#        input_label, real_image = self.encode_input(label, image)
-
-        # Fake Generation
-#        input_concat = input_label
-#        Compressed_p = self.netE.forward(input_concat)
-        
-#        latent_norm = self.normalize(Compressed_p, 1)
-
-#        if SNR is None:
-#            fake_image = self.netG.forward(latent_norm)
-#        else:
-#            sigma = 1/np.sqrt(10**(0.1*SNR))
-#            noise = sigma * torch.randn_like(latent_norm)
-#            latent_input = self.normalize(latent_norm+noise, 1)
-#            fake_image = self.netG.forward(latent_input)
-
-        # Fake Detection and Loss
-#        pred_fake_pool = self.discriminate(fake_image, use_pool=True)
-#        loss_D_fake = self.criterionGAN(pred_fake_pool, False)
-
-        # Real Detection and Loss
-#        pred_real = self.discriminate(real_image)
-#        loss_D_real = self.criterionGAN(pred_real, True)
-
-        # GAN loss (Fake Passability Loss)
- #       pred_fake = self.netD.forward(fake_image)
-#        loss_G_GAN = self.criterionGAN(pred_fake, True)
-
-        # GAN feature matching loss
-#        loss_G_GAN_Feat = 0
-#        if not self.opt.no_ganFeat_loss:
-#            feat_weights = 4.0 / (self.opt.n_layers_D + 1)
-#            D_weights = 1.0 / self.opt.num_D
-#            for i in range(self.opt.num_D):
-#                for j in range(len(pred_fake[i]) - 1):
-#                    loss_G_GAN_Feat += D_weights * feat_weights * \
-#                        self.criterionFeat(pred_fake[i][j], pred_real[i][j].detach()) * self.opt.lambda_feat
-
-        # VGG feature matching loss
-#        loss_G_VGG = 0
-#        if not self.opt.no_vgg_loss:
-#            loss_G_VGG = self.criterionVGG(fake_image, real_image) * self.opt.lambda_vgg
-#        loss_mse = 0
-#        if not self.opt.no_mse_loss:
-#            loss_mse = self.criteraion_mse(fake_image, real_image) * self.opt.lambda_mse
-#        # Only return the fake_B image if necessary to save BW
-#        if ADMM == False:
-#            return [[loss_G_GAN, loss_G_GAN_Feat, loss_mse, loss_G_VGG, loss_D_real, loss_D_fake], None if not infer else fake_image]
-#        else:
-#            return [[loss_G_GAN, loss_G_GAN_Feat, loss_mse, loss_G_VGG, loss_D_real, loss_D_fake], None if not infer else fake_image, Compressed_p]
-
-    
+        # 3. Reconstruction
+        return self.netG(latent_input)

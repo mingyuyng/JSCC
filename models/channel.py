@@ -7,8 +7,44 @@ import torch
 import torch.nn as nn
 import numpy as np
 import scipy.io as sio
+import torch.nn.functional as F
 
 PI = 3.1415926
+
+class BatchConv1DLayer(nn.Module):
+    def __init__(self, stride=1,
+                 padding=0, dilation=1):
+        super(BatchConv1DLayer, self).__init__()
+
+        self.stride = stride
+        self.padding = padding
+        self.dilation = dilation
+
+    def forward(self, x, weight, bias=None):
+        if bias is None:
+            assert x.shape[0] == weight.shape[0], "dim=0 of x must be equal in size to dim=0 of weight"
+        else:
+            assert x.shape[0] == weight.shape[0] and bias.shape[0] == weight.shape[
+                0], "dim=0 of bias must be equal in size to dim=0 of weight"
+
+        b_i, b_j, c, h = x.shape
+        b_i, out_channels, in_channels, kernel_width_size = weight.shape
+
+        out = x.permute([1, 0, 2, 3]).contiguous().view(b_j, b_i * c, h)
+        weight = weight.view(b_i * out_channels, in_channels, kernel_width_size)
+
+        out = F.conv1d(out, weight=weight, bias=None, stride=self.stride, dilation=self.dilation, groups=b_i,
+                       padding=self.padding)
+
+        out = out.view(b_j, b_i, out_channels, out.shape[-1])
+
+        out = out.permute([1, 0, 2, 3])
+
+        if bias is not None:
+            out = out + bias.unsqueeze(1).unsqueeze(3)
+
+        return out
+
 
 def Normalize(x, pwr=1):
     '''
@@ -149,21 +185,23 @@ class Channel(nn.Module):
         self.power = power/torch.sum(power)
 
         # Generate the index for batch convolution
-        self.index = toeplitz(np.arange(SMK-1, 2*SMK+opt.L-2), np.arange(SMK-1,-1,-1))
+        #self.index = toeplitz(np.arange(SMK-1, 2*SMK+opt.L-2), np.arange(SMK-1,-1,-1))
 
-    def sample(self):
+        self.bconv1d = BatchConv1DLayer(padding=opt.L-1)        
+    def sample(self, N, P, M, L):
         # Sample the channel coefficients
-        cof = torch.sqrt(self.power/2) * torch.randn(self.opt.N, self.opt.P, self.opt.L, 2)
-        cof_true = torch.cat((cof, torch.zeros((self.opt.N,self.opt.P,self.opt.M-self.opt.L,2))), 2)
+        cof = torch.sqrt(self.power/2) * torch.randn(N, P, L, 2)
+        cof_true = torch.cat((cof, torch.zeros((N,P,M-L,2))), 2)
         H_true = torch.fft(cof_true, 1)
 
         return cof, H_true
 
-    def forward(self, input, cof=None):
+    def forward(self, input, cof=None, def_index=True):
         # Input size:   NxPx(Sx(M+K))x2
         # Output size:  NxPx(L+Sx(M+K)-1)x2
         # Also return the true channel
         # Generate Channel Matrix
+
         N, P, SMK, _ = input.shape
 
         if cof is None:
@@ -172,19 +210,29 @@ class Channel(nn.Module):
         cof_true = torch.cat((cof, torch.zeros((N,P,self.opt.M-self.opt.L,2))), 2)  
         H_true = torch.fft(cof_true, 1)  # NxPxLx2
 
-        cof = torch.cat((torch.zeros((N,P,SMK-1,2)),cof,torch.zeros((N,P,SMK-1,2))), 2)   # NxPx(2xSMK+L-2)x2,   zero-padding
+        #cof = torch.cat((torch.zeros((N,P,SMK-1,2)),cof,torch.zeros((N,P,SMK-1,2))), 2)   # NxPx(2xSMK+L-2)x2,   zero-padding
 
-        channel = cof[:,:,self.index,:].cuda()                     #  NxPx(L+SMK-1)xSMKx2
-        H_real = channel[...,0].view(N*P, self.opt.L+SMK-1, SMK)   # (NxP)x(L+SMK-1)xSMK
-        H_imag = channel[...,1].view(N*P, self.opt.L+SMK-1, SMK)   # (NxP)x(L+SMK-1)xSMK
+        #if def_index:
+        #    channel = cof[:,:,self.index,:].cuda()                     #  NxPx(L+SMK-1)xSMKx2
+        #else:
+        #    index = toeplitz(np.arange(SMK-1, 2*SMK+self.opt.L-2), np.arange(SMK-1,-1,-1))
+        #    channel = cof[:,:,index,:].cuda() 
+
+        #H_real = channel[...,0].view(N*P, self.opt.L+SMK-1, SMK)   # (NxP)x(L+SMK-1)xSMK
+        #H_imag = channel[...,1].view(N*P, self.opt.L+SMK-1, SMK)   # (NxP)x(L+SMK-1)xSMK
         
-        signal_real = input[...,0].view(N*P, SMK, 1)       # (NxP)x(Sx(M+K))x1
-        signal_imag = input[...,1].view(N*P, SMK, 1)       # (NxP)x(Sx(M+K))x1
+        signal_real = input[...,0].view(N*P, 1, 1, -1)       # (NxP)x(Sx(M+K))x1
+        signal_imag = input[...,1].view(N*P, 1, 1, -1)       # (NxP)x(Sx(M+K))x1
 
-        output_real = torch.bmm(H_real, signal_real) - torch.bmm(H_imag, signal_imag)   # (NxP)x(L+SMK-1)x1
-        output_imag = torch.bmm(H_real, signal_imag) + torch.bmm(H_imag, signal_real)   # (NxP)x(L+SMK-1)x1
+        ind = torch.linspace(self.opt.L-1, 0, self.opt.L).long()
 
-        output = torch.cat((output_real, output_imag), -1)   # (NxP)x(L+SMK-1)x2
+        cof_real = cof[...,0][...,ind].view(N*P, 1, 1, -1).cuda()
+        cof_imag = cof[...,1][...,ind].view(N*P, 1, 1, -1).cuda()
+
+        output_real = self.bconv1d(signal_real, cof_real) - self.bconv1d(signal_imag, cof_imag)   # (NxP)x(L+SMK-1)x1
+        output_imag = self.bconv1d(signal_real, cof_imag) + self.bconv1d(signal_imag, cof_real)   # (NxP)x(L+SMK-1)x1
+
+        output = torch.cat((output_real.view(N*P,-1,1), output_imag.view(N*P,-1,1)), -1)   # (NxP)x(L+SMK-1)x2
 
         return output.view(N,P,self.opt.L+SMK-1,2), H_true
 
@@ -285,9 +333,35 @@ class OFDM_channel(nn.Module):
         self.pwr = pwr
 
     def sample(self):
-        return self.channel.sample()
+        return self.channel.sample(self.opt.N, self.opt.P, self.opt.M, self.opt.L)
 
-    def forward(self, x, SNR=5, cof=None):
+    def get_LMMSE_estimation(self, SNR, cof=None, repeat=1):
+
+        tx = self.pilot_cp.squeeze(2).repeat(repeat,1,1,1)
+
+        N = tx.shape[0]
+        if self.opt.is_clip:
+            tx = self.clip(tx)
+
+        y, H_true = self.channel(tx, cof, False)
+        
+        # Calculate the power of received signal
+        pwr = torch.mean(y**2, (-2,-1), True) * 2
+        noise_pwr = pwr*10**(-SNR/10)
+
+        # Generate random noise
+        noise = torch.sqrt(noise_pwr/2) * torch.randn_like(y)
+        y_noisy = y + noise
+
+        y_pilot = y_noisy[:,:,:(self.opt.M+self.opt.K+self.opt.N_pilot),:].view(N, self.opt.P, 1, self.opt.M+self.opt.K+self.opt.N_pilot, 2)
+        
+        info_pilot = self.rm_cp(y_pilot)
+        info_pilot = torch.fft(info_pilot, 1)
+
+        return LMMSE_channel_est(self.pilot, info_pilot, noise_pwr)
+
+
+    def forward(self, x, SNR, cof=None):
         # Input size: NxPxSxMx2   The information to be transmitted
         # cof denotes given channel coefficients
         N = x.shape[0]
@@ -305,7 +379,7 @@ class OFDM_channel(nn.Module):
         x = torch.cat((self.pilot_cp, x), 2)    
 
         # Reshape:                 NxPx(S+1)x(M+K)x2  => NxPx(S+1)(M+K)x2
-        x = x.view(self.opt.N, self.opt.P, (self.opt.S+1)*(self.opt.M+self.opt.K+self.opt.N_pilot), 2)
+        x = x.view(N, self.opt.P, (self.opt.S+1)*(self.opt.M+self.opt.K+self.opt.N_pilot), 2)
 
         # Clipping (Optional):     NxPx(S+1)(M+K)x2  => NxPx(S+1)(M+K)x2
         if self.opt.is_clip:

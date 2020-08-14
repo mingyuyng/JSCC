@@ -23,7 +23,7 @@ opt.gan_mode = 'none'       # 'wgangp', 'lsgan', 'vanilla', 'none'
 opt.n_layers_D = 3
 opt.label_smooth = 1          # Label smoothing factor (for lsgan and vanilla gan only)
 
-opt.C_channel = 8             # The output channel number of encoder (Important: it controls the rate)
+opt.C_channel = 16            # The output channel number of encoder (Important: it controls the rate)
 opt.n_downsample= 2           # Downsample times 
 opt.n_blocks = 2              # Numebr of residual blocks
 opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
@@ -33,10 +33,10 @@ opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
 
 
 # Set up the training procedure
-opt.batchSize = 64           # batch size
+opt.batchSize = 128          # batch size
 opt.n_epochs = 300           # # of epochs without lr decay
 opt.n_epochs_decay = 300     # # of epochs with lr decay
-opt.lr = 2e-4                # Initial learning rate
+opt.lr = 5e-4                # Initial learning rate
 opt.lr_policy = 'linear'     # decay policy.  Availability:  see options/train_options.py
 opt.beta1 = 0.5              # parameter for ADAM
 
@@ -62,7 +62,9 @@ if opt.dataset_mode == 'CIFAR10':
     opt.dataroot='./data'
     opt.size = 32
     transform = transforms.Compose(
-        [transforms.ToTensor(),
+        [transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomCrop(opt.size, padding=5, pad_if_needed=True, fill=0, padding_mode='reflect'),
+        transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
@@ -88,12 +90,12 @@ else:
 size_after_compress = (opt.size//(opt.n_downsample**2))**2 * (opt.C_channel//2)
 
 opt.N = opt.batchSize                       # Batch size
-opt.S = 1                                   # Number of symbols
+opt.P = 1                                   # Number of symbols
 opt.M = 64                                  # Number of subcarriers per symbol
 opt.K = 16                                  # Length of CP
 opt.L = 8                                   # Number of paths
 opt.decay = 4
-opt.P = size_after_compress//opt.M          # Number of packets
+opt.S = size_after_compress//opt.M          # Number of packets
 
 opt.is_clip = False
 opt.PAPR = 5
@@ -104,12 +106,12 @@ opt.is_cfo_random = False
 opt.max_ang = 1.7
 opt.ang = 1.7
 
-opt.is_feedback = True
+opt.is_feedback = False
+
+opt.SNR = 15
 
 opt.is_pilot = False
 opt.N_pilot = 0   # Set to 0 if opt.is_pilot is false
-
-opt.SNR = 5
 
 opt.CE = 'LMMSE'  # Channel Estimation Method
 opt.EQ = 'MMSE'   # Equalization Method
@@ -117,13 +119,13 @@ opt.EQ = 'MMSE'   # Equalization Method
 if opt.CE not in ['LS', 'LMMSE', 'TRUE']:
     raise Exception("Channel estimation method not implemented")
 
-if opt.EQ not in ['ZF', 'MMSE', 'IMPLICIT']:
+if opt.EQ not in ['ZF', 'MMSE', 'IMPLICIT', 'MMSE+', 'ZF+']:
     raise Exception("Equalization method not implemented")
 
 
 # Display setting
 opt.checkpoints_dir = './Checkpoints/'+ opt.dataset_mode + '_OFDM'
-opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.CE + '_' + opt.EQ + '_feed_' + str(opt.is_feedback) + '_clip_' + str(opt.is_clip)
+opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.CE + '_' + opt.EQ + '_feed_' + str(opt.is_feedback) + '_clip_' + str(opt.is_clip) + '_SNR_' + str(opt.SNR)
 
 opt.display_env =  opt.dataset_mode + '_OFDM_' + opt.name
 

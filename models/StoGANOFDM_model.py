@@ -25,8 +25,8 @@ class StoGANOFDMModel(BaseModel):
         else:  # during test time, only load G
             self.model_names = ['E', 'G']
         
-        if self.opt.EQ == 'IMPLICIT':
-            C_decode = 2*opt.C_channel
+        if self.opt.EQ in ['IMPLICIT', 'MMSE+', 'ZF+']:
+            C_decode = 3*opt.C_channel
         else:
             C_decode = opt.C_channel
 
@@ -98,7 +98,8 @@ class StoGANOFDMModel(BaseModel):
         
         # Generate latent vector
         if self.opt.is_feedback:
-            cof, H = self.channel.sample()
+            cof, _ = self.channel.sample()
+            H = self.channel.get_LMMSE_estimation(self.opt.SNR, cof)            
             latent = self.netE(self.real_A, H.cuda())
         else:
             cof = None
@@ -120,14 +121,20 @@ class StoGANOFDMModel(BaseModel):
         # Equalization and decode
         if self.opt.EQ == 'ZF':
             rx = channel.ZF_equalization(H_est, out_sig)
-            self.fake = self.netG(rx.view(latent.shape))
+            self.fake = self.netG((rx.view(latent.shape)))
         elif self.opt.EQ == 'MMSE':
             rx = channel.MMSE_equalization(H_est, out_sig, self.opt.M*noise_pwr)
-            self.fake = self.netG(rx.view(latent.shape))
+            self.fake = self.netG((rx.view(latent.shape)))
         elif self.opt.EQ == 'IMPLICIT':
             N, C, H, W = latent.shape
             dec_in = torch.cat((H_est, out_sig), 1).view(N, -1, H, W)
             self.fake = self.netG(dec_in)
+        elif self.opt.EQ == 'MMSE+':
+            rx = channel.MMSE_equalization(H_est, out_sig, self.opt.M*noise_pwr)
+            self.fake = self.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape), out_pilot.view(latent.shape)), 1))
+        elif self.opt.EQ == 'ZF+':
+            rx = channel.ZF_equalization(H_est, out_sig)
+            self.fake = self.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape)), 1))
 
 
     def backward_D(self):
@@ -196,14 +203,29 @@ class StoGANOFDMModel(BaseModel):
         self.backward_G()                   # calculate graidents for G
         self.optimizer_G.step()             # udpate G's weights
 
+    def get_channel(self):
+        cof, _ = self.channel.sample()
+        return cof
 
-    def get_encoded(self):
+    def get_encoded(self, cof):
     
-        return self.normalize(self.netE(self.real_A), 1)
+        if cof is not None:
+            H = self.channel.get_LMMSE_estimation(self.opt.SNR, cof)            
+            latent = self.netE(self.real_A, H.cuda())
+        else:
+            latent = self.netE(self.real_A)
 
-    def get_decoded(self, latent, SNR=None):
-        pass
+        return latent
 
-    def get_losses(self):
-        pass
+    def get_pass_channel(self, latent, cof):
+
+        N = latent.shape[0]
+        tx = latent.view(N, self.opt.P, self.opt.S, self.opt.M, 2)
+        # Normalization is contained in the channel
+        out_pilot, out_sig, H_true, noise_pwr = self.channel(tx, SNR=self.opt.SNR, cof=cof)
+
+        return out_pilot, out_sig, H_true, noise_pwr
+
+    def get_decoded(self, latent):
+        self.fake = self.netG(latent)
 

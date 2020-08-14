@@ -32,7 +32,7 @@ opt.first_kernel = 5          # The filter size of the first convolutional layer
 opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
 
 # Choose the channel 
-opt.channel = 'bsc'          # Available channels: 'awgn', 'ofdm', 'bsc'
+opt.channel = 'awgn'          # Available channels: 'awgn', 'ofdm', 'bsc'
 
 # Set up the training procedure
 opt.batchSize = 64           # batch size
