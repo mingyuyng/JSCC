@@ -26,3 +26,10 @@ Three GANs available:  **vanilla GAN, LSGAN, WGAN**
 Use **nohup** to run multiple threads
 
 The basic coding framework is based on pix2pix [Github](https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix)
+
+
+## 08/16 update
+
+* Support multiple pilots for channel estimation
+* Added three forward methods
+* Able to test the OFDM channel in models/test_OFDM.py
