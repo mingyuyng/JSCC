@@ -409,7 +409,7 @@ class Encoder_OFDM(nn.Module):
         z =  self.model_down(input)
         if H is not None:
             N,C,HH,WW = z.shape            
-            z = torch.cat((z,H.view(N, -1, HH,WW)), 1)
+            z = torch.cat((z,H.contiguous().permute(0,1,2,4,3).view(N, -1, HH,WW)), 1)
         z = self.model_res(z)
         return  self.projection(z)
 

@@ -33,9 +33,9 @@ opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
 
 
 # Set up the training procedure
-opt.batchSize = 128          # batch size
+opt.batchSize = 64          # batch size
 opt.n_epochs = 300           # # of epochs without lr decay
-opt.n_epochs_decay = 300     # # of epochs with lr decay
+opt.n_epochs_decay = 400     # # of epochs with lr decay
 opt.lr = 5e-4                # Initial learning rate
 opt.lr_policy = 'linear'     # decay policy.  Availability:  see options/train_options.py
 opt.beta1 = 0.5              # parameter for ADAM
@@ -109,23 +109,25 @@ opt.ang = 1.7
 opt.is_feedback = False
 
 opt.SNR = 15
-
-opt.is_pilot = False
-opt.N_pilot = 0   # Set to 0 if opt.is_pilot is false
+opt.N_pilot = 2   # Number of pilots for chanenl estimation
 
 opt.CE = 'LMMSE'  # Channel Estimation Method
 opt.EQ = 'MMSE'   # Equalization Method
 
+opt.feedforward = 'PLAIN'
+
 if opt.CE not in ['LS', 'LMMSE', 'TRUE']:
     raise Exception("Channel estimation method not implemented")
 
-if opt.EQ not in ['ZF', 'MMSE', 'IMPLICIT', 'MMSE+', 'ZF+']:
+if opt.EQ not in ['ZF', 'MMSE']:
     raise Exception("Equalization method not implemented")
 
+if opt.feedforward not in ['PLAIN', 'RESIDUAL', 'IMPLICIT_EQ']:
+    raise Exception("Forward method not implemented")
 
 # Display setting
 opt.checkpoints_dir = './Checkpoints/'+ opt.dataset_mode + '_OFDM'
-opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.CE + '_' + opt.EQ + '_feed_' + str(opt.is_feedback) + '_clip_' + str(opt.is_clip) + '_SNR_' + str(opt.SNR)
+opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.CE + '_' + opt.EQ + '_' + opt.feedforward + '_feed_' + str(opt.is_feedback) + '_clip_' + str(opt.is_clip) + '_SNR_' + str(opt.SNR)
 
 opt.display_env =  opt.dataset_mode + '_OFDM_' + opt.name
 

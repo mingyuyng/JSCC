@@ -55,7 +55,7 @@ if opt.dataset_mode == 'CIFAR10':
         [transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-    testset = torchvision.datasets.CIFAR10(root='./data', train=False,
+    testset = torchvision.datasets.CIFAR10(root='./data', train=True,
                                             download=True, transform=transform)
     dataset = torch.utils.data.DataLoader(testset, batch_size=opt.batchSize,
                                              shuffle=False, num_workers=2)
@@ -96,23 +96,27 @@ opt.ang = 1.7
 
 opt.is_feedback = False
 
-opt.is_pilot = False
-opt.N_pilot = 0   # Set to 0 if opt.is_pilot is false
-
 opt.SNR = 15
+opt.N_pilot = 2   # Number of pilots for chanenl estimation
 
 opt.CE = 'LMMSE'  # Channel Estimation Method
-opt.EQ = 'MMSE+'   # Equalization Method
+opt.EQ = 'MMSE'   # Equalization Method
+
+opt.feedforward = 'PLAIN'
 
 if opt.CE not in ['LS', 'LMMSE', 'TRUE']:
     raise Exception("Channel estimation method not implemented")
 
-if opt.EQ not in ['ZF', 'MMSE', 'IMPLICIT', 'MMSE+', 'ZF+']:
+if opt.EQ not in ['ZF', 'MMSE']:
     raise Exception("Equalization method not implemented")
+
+if opt.feedforward not in ['PLAIN', 'RESIDUAL', 'IMPLICIT_EQ']:
+    raise Exception("Forward method not implemented")
+
 
 # Display setting
 opt.checkpoints_dir = './Checkpoints/'+ opt.dataset_mode + '_OFDM'
-opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.CE + '_' + opt.EQ + '_feed_' + str(opt.is_feedback) + '_clip_' + str(opt.is_clip) + '_SNR_' + str(opt.SNR)
+opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.CE + '_' + opt.EQ + '_' + opt.feedforward + '_feed_' + str(opt.is_feedback) + '_clip_' + str(opt.is_clip) + '_SNR_' + str(opt.SNR)
 
 output_path = './Images/' +  opt.dataset_mode + '_OFDM/' + opt.name
 

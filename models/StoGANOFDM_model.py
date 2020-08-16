@@ -25,10 +25,12 @@ class StoGANOFDMModel(BaseModel):
         else:  # during test time, only load G
             self.model_names = ['E', 'G']
         
-        if self.opt.EQ in ['IMPLICIT', 'MMSE+', 'ZF+']:
-            C_decode = 3*opt.C_channel
-        else:
+        if self.opt.feedforward == 'PLAIN':
             C_decode = opt.C_channel
+        elif self.opt.feedforward == 'RESIDUAL':
+            C_decode = opt.C_channel + self.opt.N_pilot*self.opt.P*2 + self.opt.P*2
+        elif self.opt.feedforward == 'IMPLICIT_EQ':
+            C_decode = opt.C_channel + self.opt.N_pilot*self.opt.P*2 + self.opt.P*2
 
         if self.opt.is_feedback:
             add_C = opt.C_channel
@@ -74,7 +76,7 @@ class StoGANOFDMModel(BaseModel):
         
         # Initialize the pilots and OFDM channel
         self.pilot = torch.load('util/pilot.pt')
-        self.channel = channel.OFDM_channel(opt, pwr=1, pilot=self.pilot)
+        self.channel = channel.OFDM_channel(opt, self.device, pwr=1, pilot=self.pilot)
 
         
     def name(self):
@@ -96,45 +98,60 @@ class StoGANOFDMModel(BaseModel):
         
     def forward(self):
         
+        N = self.real_A.shape[0]
         # Generate latent vector
         if self.opt.is_feedback:
-            cof, _ = self.channel.sample()
-            H = self.channel.get_LMMSE_estimation(self.opt.SNR, cof)            
-            latent = self.netE(self.real_A, H.cuda())
+            cof, _ = self.channel.sample(N)
+            H = self.channel.get_channel_estimation(self.opt.CE, self.opt.SNR, N, cof)
+            if torch.cuda.is_available():
+                H = H.to(self.device)               
+            latent = self.netE(self.real_A, H)
         else:
             cof = None
             latent = self.netE(self.real_A)
 
-        tx = latent.view(self.opt.N, self.opt.P, self.opt.S, self.opt.M, 2)
+        tx = latent.view(self.opt.N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
 
         # Normalization is contained in the channel
         out_pilot, out_sig, H_true, noise_pwr = self.channel(tx, SNR=self.opt.SNR, cof=cof)
 
         # Channel estimation
-        if self.opt.CE == 'LS':
-            H_est = channel.LS_channel_est(self.channel.pilot, out_pilot)
-        elif self.opt.CE == 'LMMSE':
-            H_est = channel.LMMSE_channel_est(self.channel.pilot, out_pilot, self.opt.M*noise_pwr)
-        elif self.opt.CE == 'TRUE':
-            H_est = H_true.unsqueeze(2)
+        #if self.opt.CE == 'LS':
+        #    H_est = channel.LS_channel_est(self.channel.pilot, out_pilot)
+        #elif self.opt.CE == 'LMMSE':
+        #    H_est = channel.LMMSE_channel_est(self.channel.pilot, out_pilot, self.opt.M*noise_pwr)
+        #elif self.opt.CE == 'TRUE':
+        #    H_est = H_true.unsqueeze(2)
 
         # Equalization and decode
-        if self.opt.EQ == 'ZF':
-            rx = channel.ZF_equalization(H_est, out_sig)
-            self.fake = self.netG((rx.view(latent.shape)))
-        elif self.opt.EQ == 'MMSE':
-            rx = channel.MMSE_equalization(H_est, out_sig, self.opt.M*noise_pwr)
-            self.fake = self.netG((rx.view(latent.shape)))
-        elif self.opt.EQ == 'IMPLICIT':
+        #if self.opt.EQ == 'ZF':
+        #    rx = channel.ZF_equalization(H_est, out_sig)
+        #    self.fake = self.netG((rx.view(latent.shape)))
+        #elif self.opt.EQ == 'MMSE':
+        #    rx = channel.MMSE_equalization(H_est, out_sig, self.opt.M*noise_pwr)
+        #    self.fake = self.netG((rx.view(latent.shape)))
+        #elif self.opt.EQ == 'IMPLICIT':
+        #    N, C, H, W = latent.shape
+        #    dec_in = torch.cat((H_est, out_sig), 1).view(N, -1, H, W)
+        #    self.fake = self.netG(dec_in)
+        #elif self.opt.EQ == 'MMSE+':
+        #    rx = channel.MMSE_equalization(H_est, out_sig, self.opt.M*noise_pwr)
+        #    self.fake = self.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape), out_pilot.view(latent.shape)), 1))
+        #elif self.opt.EQ == 'ZF+':
+        #    rx = channel.ZF_equalization(H_est, out_sig)
+        #    self.fake = self.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape)), 1))
+
+        H_est, rx = channel.OFDM_receiver(self.opt.CE, self.opt.EQ, out_sig, out_pilot, self.channel.pilot, self.opt.M*noise_pwr, H_true=H_true)
+
+        if self.opt.feedforward == 'PLAIN':
+            self.fake = self.netG(rx.permute(0,1,2,4,3).contiguous().view(latent.shape))
+        elif self.opt.feedforward == 'RESIDUAL':
+            self.fake = self.netG(torch.cat((rx, H_est, out_pilot), 1).contiguous().permute(0,1,2,4,3).view(latent.shape))
+        elif self.opt.feedforward == 'IMPLICIT_EQ':
             N, C, H, W = latent.shape
-            dec_in = torch.cat((H_est, out_sig), 1).view(N, -1, H, W)
+            dec_in = torch.cat((out_sig, H_est, out_pilot), 1).contiguous().permute(0,1,2,4,3).view(N, -1, H, W)
             self.fake = self.netG(dec_in)
-        elif self.opt.EQ == 'MMSE+':
-            rx = channel.MMSE_equalization(H_est, out_sig, self.opt.M*noise_pwr)
-            self.fake = self.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape), out_pilot.view(latent.shape)), 1))
-        elif self.opt.EQ == 'ZF+':
-            rx = channel.ZF_equalization(H_est, out_sig)
-            self.fake = self.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape)), 1))
+
 
 
     def backward_D(self):
