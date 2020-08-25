@@ -35,7 +35,7 @@ opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
 # Set up the training procedure
 opt.batchSize = 1           # batch size
 
-opt.activation = 'sigmoid'    # The output activation function at the last layer in the decoder
+opt.activation = 'tanh'    # The output activation function at the last layer in the decoder
 opt.norm_EG = 'batch'
 
 if opt.dataset_mode == 'CIFAR10':
@@ -65,10 +65,10 @@ else:
 
 
 # Choose the channel 
-opt.channel = 'awgn'          # Available channels: 'awgn', 'ofdm', 'bsc'
+opt.channel = 'bsc'          # Available channels: 'awgn', 'ofdm', 'bsc'
 
 if opt.channel == 'bsc':
-    opt.ber = 0.1             # Set the bit flip rate for bsc channel
+    opt.ber = 0.05             # Set the bit flip rate for bsc channel
     opt.enc_type = 'prob'
     opt.sample_type = 'gumbel_softmax_hard'
     opt.temp = 0.5

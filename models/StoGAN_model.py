@@ -26,7 +26,7 @@ class StoGANModel(BaseModel):
             self.model_names = ['E', 'G', 'D']
         else:  # during test time, only load G
             self.model_names = ['E', 'G']
-
+        
         # define networks (both generator and discriminator)
         self.netE = networks.define_E(input_nc=opt.input_nc, ngf=opt.ngf, max_ngf=opt.max_ngf,
                                       n_downsample=opt.n_downsample, C_channel=opt.C_channel, 
@@ -61,7 +61,6 @@ class StoGANModel(BaseModel):
                 self.optimizer_D = torch.optim.Adam(params, lr=opt.lr, betas=(opt.beta1, 0.999))
                 self.optimizers.append(self.optimizer_D)
 
-            
 
         self.normalize = networks.Normalize()
         self.opt = opt
@@ -102,7 +101,7 @@ class StoGANModel(BaseModel):
         latent_input = self.channel(self.latent)
 
         # 3. Reconstruction
-        self.fake = self.netG(latent_input)
+        self.fake = self.netG(latent)
 
     def backward_D(self):
         """Calculate GAN loss for the discriminator"""

@@ -293,7 +293,7 @@ def cal_gradient_penalty(netD, real_data, fake_data, device, type='mixed', const
         else:
             raise NotImplementedError('{} not implemented'.format(type))
         interpolatesv.requires_grad_(True)
-        _, disc_interpolates = netD(interpolatesv)
+        disc_interpolates = netD(interpolatesv)
         gradients = torch.autograd.grad(outputs=disc_interpolates, inputs=interpolatesv,
                                         grad_outputs=torch.ones(disc_interpolates.size()).to(device),
                                         create_graph=True, retain_graph=True, only_inputs=True)
@@ -1092,29 +1092,105 @@ class MultiscaleDiscriminator(nn.Module):
         return result
 
 
-class CE_Net(nn.Module):
-    def __init__(self, input_len):
-        super(CE_Net, self).__init__()
 
-        self.net = nn.Sequential(
-            nn.Linear(input_len, input_len),
-            nn.ReLU(),
-            nn.Linear(input_len, input_len))
+class DC_Generator(torch.nn.Module):
+    def __init__(self, in_channels, channels, norm_layer=nn.BatchNorm2d, act='ReLU'):
+        super().__init__()
+        # Filters [1024, 512, 256]
+        # Input_dim = 100
+        # Output_dim = C (number of channels)
+
+        if type(norm_layer) == functools.partial:
+            use_bias = norm_layer.func == nn.InstanceNorm2d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm2d
+        if act == 'ReLU':
+            activation = nn.ReLU(True)
+        elif act == 'LeakyReLU':
+            activation = nn.LeakyReLU(0.2, inplace=True)
+
+        self.main_module = nn.Sequential(
+            # Z latent vector 100
+            nn.ConvTranspose2d(in_channels=in_channels, out_channels=1024, kernel_size=4, stride=1, padding=0, bias=use_bias),
+            norm_layer(1024),
+            activation,
+
+            # State (1024x4x4)
+            nn.ConvTranspose2d(in_channels=1024, out_channels=512, kernel_size=4, stride=2, padding=1, bias=use_bias),
+            norm_layer(512),
+            activation,
+
+            # State (512x8x8)
+            nn.ConvTranspose2d(in_channels=512, out_channels=256, kernel_size=4, stride=2, padding=1, bias=use_bias),
+            norm_layer(256),
+            activation,
+
+            # State (256x16x16)
+            nn.ConvTranspose2d(in_channels=256, out_channels=channels, kernel_size=4, stride=2, padding=1))
+            # output of main module --> Image (Cx32x32)
+
+        self.output = nn.Tanh()
 
     def forward(self, x):
-        return self.net(x)
+        x = self.main_module(x)
+        return self.output(x)
 
 
-class EQ_Net(nn.Module):
-    def __init__(self, input_len, output_len):
-        super(EQ_Net, self).__init__()
+class DC_Discriminator(torch.nn.Module):
+    def __init__(self, channels, norm_layer=nn.BatchNorm2d, act='ReLU'):
+        super().__init__()
+        # Filters [256, 512, 1024]
+        # Input_dim = channels (Cx64x64)
+        # Output_dim = 1
 
-        self.net = nn.Sequential(
-            nn.Linear(input_len, input_len),
-            nn.ReLU(),
-            nn.Linear(input_len, output_len))
+        if type(norm_layer) == functools.partial:
+            use_bias = norm_layer.func == nn.InstanceNorm2d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm2d
+        if act == 'ReLU':
+            activation = nn.ReLU(True)
+        elif act == 'LeakyReLU':
+            activation = nn.LeakyReLU(0.2, inplace=True)
+
+        self.main_module = nn.Sequential(
+            # Image (Cx32x32)
+            nn.Conv2d(in_channels=channels, out_channels=256, kernel_size=4, stride=2, padding=1, bias=use_bias),
+            norm_layer(256),
+            activation,
+
+            # State (256x16x16)
+            nn.Conv2d(in_channels=256, out_channels=512, kernel_size=4, stride=2, padding=1, bias=use_bias),
+            norm_layer(512),
+            activation,
+
+            # State (512x8x8)
+            nn.Conv2d(in_channels=512, out_channels=1024, kernel_size=4, stride=2, padding=1, bias=use_bias),
+            norm_layer(1024),
+            activation)
+            # outptut of main module --> State (1024x4x4)
+
+        self.output = nn.Sequential(
+            nn.Conv2d(in_channels=1024, out_channels=1, kernel_size=4, stride=1, padding=0))
 
     def forward(self, x):
-        return self.net(x)
+        x = self.main_module(x)
+        return self.output(x)
+
+    def feature_extraction(self, x):
+        # Use discriminator for feature extraction then flatten to vector of 16384 features
+        x = self.main_module(x)
+        return x.view(-1, 1024*4*4)
 
 
+def define_DC_G(in_channels=100, channels=3, activation='ReLU', norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[]):
+    net = None
+    norm_layer = get_norm_layer(norm_type=norm)
+    net = DC_Generator(in_channels=in_channels, channels=channels, norm_layer=norm_layer, act=activation)    
+    return init_net(net, init_type, init_gain, gpu_ids)
+
+
+def define_DC_D(channels=3, activation='ReLU', norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[]):
+    net = None
+    norm_layer = get_norm_layer(norm_type=norm)
+    net = DC_Discriminator(channels=channels, norm_layer=norm_layer, act=activation) 
+    return init_net(net, init_type, init_gain, gpu_ids)

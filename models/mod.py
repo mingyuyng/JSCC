@@ -58,10 +58,11 @@ class QAM():
             self.inv_map_0[i] = np.where(tmp<2**(B//2-1-i))[0] 
             tmp[tmp>=2**(B//2-1-i)] -= 2**(B//2-1-i)
 
+        self.constellation = (np.expand_dims(self.map, axis=1) + np.expand_dims(self.map, axis=0)*1j)*self.unit        
         self.bound = self.unit*(np.arange(-2**(B//2)+2, 2**(B//2), 2))
         self.B = B
 
-    def LLR(self, y, sigma, simple = False):
+    def LLR(self, y, sigma):
 
         M = y.shape[0]
         LLR = []
@@ -73,48 +74,66 @@ class QAM():
             LLR_imag = []
 
             for i in range(self.B//2):
+
                 pos_0 = self.inv_map_0[i]
                 pos_1 = self.inv_map_1[i]
                 sym_0 = self.map[f(pos_0)]*self.unit
                 sym_1 = self.map[f(pos_1)]*self.unit
 
-                if not simple:
-                    prob_0_real = np.sum(np.exp(-(sym.real - sym_0)**2/(sigma**2)))
-                    prob_1_real = np.sum(np.exp(-(sym.real - sym_1)**2/(sigma**2)))
+                
+                prob_0_real = np.sum(np.exp(-(sym.real - sym_0)**2/(sigma**2)))
+                prob_1_real = np.sum(np.exp(-(sym.real - sym_1)**2/(sigma**2)))
 
-                    prob_0_imag = np.sum(np.exp(-(sym.imag - sym_0)**2/(sigma**2)))
-                    prob_1_imag = np.sum(np.exp(-(sym.imag - sym_1)**2/(sigma**2)))
+                prob_0_imag = np.sum(np.exp(-(sym.imag - sym_0)**2/(sigma**2)))
+                prob_1_imag = np.sum(np.exp(-(sym.imag - sym_1)**2/(sigma**2)))
 
-                    ratio_real = np.log(prob_0_real) - np.log(prob_1_real)
-                    ratio_imag = np.log(prob_0_imag) - np.log(prob_1_imag)
-                else:
+                ratio_real = np.log(prob_0_real) - np.log(prob_1_real)
+                ratio_imag = np.log(prob_0_imag) - np.log(prob_1_imag)
 
-                    # Euclidean Distance
-                    #prob_0_real = np.min((sym.real - sym_0)**2)
-                    #prob_1_real = np.min((sym.real - sym_1)**2)
+                LLR_real.append(ratio_real)
+                LLR_imag.append(ratio_imag)
 
-                    #prob_0_imag = np.min((sym.imag - sym_0)**2)
-                    #prob_1_imag = np.min((sym.imag - sym_1)**2)
+            LLR.append(np.stack(LLR_real))
+            LLR.append(np.stack(LLR_imag))
 
-                    #ratio_real = prob_1_real - prob_0_real
-                    #ratio_imag = prob_1_imag - prob_0_imag
+        return np.hstack(LLR)
+    
+    def LLR_dist(self, y):
+        # Calculate the LLR based on Euclidean distance
+        # Used when there is clipping effect
+        # y: received symbols
+        M = y.shape[0]
+        LLR = []
+        for m in range(M):
+            sym = y[m]
+            
+            f = np.vectorize(np.int)
+            LLR_real = []
+            LLR_imag = []
 
-                    # Euclidean Distance (exponential)
-                    dist_0_real = np.min((sym.real - sym_0)**2)
-                    dist_1_real = np.min((sym.real - sym_1)**2)
+            for i in range(self.B//2):
 
-                    dist_0_imag = np.min((sym.imag - sym_0)**2)
-                    dist_1_imag = np.min((sym.imag - sym_1)**2)
+                pos_0 = self.inv_map_0[i]
+                pos_1 = self.inv_map_1[i]
+                sym_0 = self.map[f(pos_0)]*self.unit
+                sym_1 = self.map[f(pos_1)]*self.unit
+
+                # Euclidean Distance (exponential)
+                dist_0_real = np.min((sym.real - sym_0)**2)
+                dist_1_real = np.min((sym.real - sym_1)**2)
+
+                dist_0_imag = np.min((sym.imag - sym_0)**2)
+                dist_1_imag = np.min((sym.imag - sym_1)**2)
 
 
-                    prob_1_real = 1/(1+np.exp(2*dist_1_real-2*dist_0_real))
-                    prob_0_real = 1 - prob_1_real
+                prob_1_real = 1/(1+np.exp(2*dist_1_real-2*dist_0_real))
+                prob_0_real = 1 - prob_1_real
 
-                    prob_1_imag = 1/(1+np.exp(2*dist_1_imag-2*dist_0_imag))
-                    prob_0_imag= 1 - prob_1_imag
+                prob_1_imag = 1/(1+np.exp(2*dist_1_imag-2*dist_0_imag))
+                prob_0_imag= 1 - prob_1_imag
 
-                    ratio_real = np.log(prob_0_real) - np.log(prob_1_real)
-                    ratio_imag = np.log(prob_0_imag) - np.log(prob_1_imag)
+                ratio_real = np.log(prob_0_real) - np.log(prob_1_real)
+                ratio_imag = np.log(prob_0_imag) - np.log(prob_1_imag)
 
 
                 LLR_real.append(ratio_real)
@@ -124,6 +143,39 @@ class QAM():
             LLR.append(np.stack(LLR_imag))
 
         return np.hstack(LLR)
+
+
+    def LLR_OFDM(self, y, H, sigma2,eps=1e-50):
+        # LLR calculation for OFDM system
+        # Used when we have perfect channel knowledge
+        # y: received symbols
+        # H: estimated channel frequency response
+
+        M = y.shape[0]
+        LLR = []
+        for m in range(M):
+            sym = y[m]
+            XH = H[m] * self.constellation            
+            for i in range(self.B):
+
+                if i < self.B//2:
+                    ind = self.map2[:, i%(self.B//2)]
+                    symbols_0 = XH[ind==0, :]
+                    symbols_1 = XH[ind==1, :]
+                else:
+                    ind = self.map2[:, i%(self.B//2)]
+                    symbols_0 = XH[:, ind==0]
+                    symbols_1 = XH[:, ind==1]
+
+                prob_0 = np.sum(np.exp(-((sym.real-symbols_0.real)**2+(sym.imag-symbols_0.imag)**2)/(sigma2[m]/2)))
+                prob_1 = np.sum(np.exp(-((sym.real-symbols_1.real)**2+(sym.imag-symbols_1.imag)**2)/(sigma2[m]/2)))
+
+                ratio = np.log(prob_0+eps) - np.log(prob_1+eps)
+                
+                LLR.append(ratio)
+
+        return np.hstack(LLR)
+
 
     def Modulation(self, x):
         '''

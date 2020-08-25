@@ -28,14 +28,11 @@ qam = QAM(Ave_Energy=1, B=N_bit)
 #
 # Parameters:
 #    N: batch size
-#    P: number of packets
+#    P: number of packets (Now is set to 1)
 #    S: number of information symbols per packet (there is also ONE symbol for pilots)
 #    M: number of subcarriers per symbol. Default is 64. 
 #    K: length of cyclic prefix. Default is 16
 #    L: number of taps for the multipath channel
-#
-#    is_clip:  whether to clip or not
-#    PAPR:     the PAPR requirement
 #    
 #    is_cfo:   whether to include CFO effect
 #    is_trick: whether to include the phase uncertainty
@@ -59,29 +56,29 @@ qam = QAM(Ave_Energy=1, B=N_bit)
 ################################################################################
 
 opt = types.SimpleNamespace()
-opt.N = 200        # Batch size
-opt.P = 1          # Number of packets
+opt.N = 200       # Batch size
+opt.P = 1          # Number of packets  (Keep this as 1 for now)
 opt.S = 4          # Number of symbols
 opt.M = 64         # Number of subcarriers per symbol
 opt.K = 16         # Length of CP
 opt.L = 8          # Number of paths
 opt.decay = 4
 
-opt.is_clip = False
-opt.PAPR = 5
+opt.is_clip = True    # Whether to clip the OFDM signal or not
+opt.CR = 1             # Clipping Ratio
 
-opt.is_cfo = False
+opt.is_cfo = False     # Whether to add CFO to the OFDM signal (not used for the experiment yet)
 opt.is_trick = True
 opt.is_cfo_random = False
 opt.max_ang = 1.7
 opt.ang = 1.7
 
-opt.N_pilot = 2   # Set to 0 if opt.is_pilot is false
+opt.N_pilot = 2        # Number of pilots for channel estimation
 
-opt.gpu_ids = ['0']
+opt.gpu_ids = ['0']    # GPU setting
 
-CE = 'LMMSE'  # Channel Estimation Method
-EQ = 'MMSE'   # Equalization Method
+CE = 'LMMSE'       # Channel Estimation Method
+EQ = 'MMSE'         # Equalization Method
 CHANNEL_CODE = 'LDPC'   # Channel Coding 
 
 if CE not in ['LS', 'LMMSE', 'TRUE']:
@@ -106,23 +103,21 @@ if CHANNEL_CODE == 'LDPC':
 elif CHANNEL_CODE == 'NONE':
     k = n
 
-# Load the generated pilot
-# pilot = torch.load('pilot.pt')
-
 # Create the OFDM channel
-
 device = torch.device('cuda:{}'.format(opt.gpu_ids[0])) if opt.gpu_ids else torch.device('cpu')
 
-pilot = torch.load('../util/pilot.pt')
-ofdm_channel = OFDM_channel(opt, device, pilot=pilot)
+#pilot = torch.load('../util/pilot.pt')
+ofdm_channel = OFDM_channel(opt, device)
 SNR_list = np.arange(0,35,5)
-
-
 
 print('Total number of bits tested: %d' % (opt.N*k))
 print('Channel Estimation: ' + CE)
 print('Equalization: ' + EQ)
 print('Channel Coding: ' + CHANNEL_CODE)
+
+
+#########################################################################################
+#Test the BER for each SNR value
 
 for idx in range(SNR_list.shape[0]):
 
@@ -147,48 +142,54 @@ for idx in range(SNR_list.shape[0]):
         tx_tmp = np.concatenate((tx_sym.real, tx_sym.imag), axis=1)
         tx = tx_tmp.reshape(opt.N, opt.P, opt.S, opt.M, N_bit)
 
+
     tx = torch.from_numpy(tx).float().to(device)
     
     # Pass the OFDM channel 
     out_pilot, out_sig, H_true, noise_pwr = ofdm_channel(tx, SNR=SNR)
-    
-    H_est, rx = OFDM_receiver(CE, EQ, out_sig, out_pilot, ofdm_channel.pilot, opt.M*noise_pwr, H_true=H_true)
 
     # Channel Estimation
-    #if CE == 'LS':
-    #    H_est = LS_channel_est(ofdm_channel.pilot, out_pilot)
-    #elif CE == 'LMMSE':
-    #    H_est = LMMSE_channel_est(ofdm_channel.pilot, out_pilot, opt.M*noise_pwr)
-    #elif CE == 'TRUE':
-    #    H_est = H_true.unsqueeze(2)
+    if CE == 'LS':
+        H_est = LS_channel_est(ofdm_channel.pilot, out_pilot)
+    elif CE == 'LMMSE':
+        H_est = LMMSE_channel_est(ofdm_channel.pilot, out_pilot, opt.M*noise_pwr)
+    elif CE == 'TRUE':
+        H_est = H_true.unsqueeze(2).to(device)
 
     print("Channel estimation MSE: %f" % (torch.sum(abs(H_est.squeeze(2)-H_true.to(device))**2).item() /opt.N))
 
     # Equalization
-    #if EQ == 'ZF':
-    #    rx_sym = ZF_equalization(H_est, out_sig).numpy()
-    #elif EQ == 'MMSE':
-    #    rx_sym = MMSE_equalization(H_est, out_sig, opt.M*noise_pwr).numpy()
+    if EQ == 'ZF':
+        rx_sym = ZF_equalization(H_est, out_sig).detach().cpu().numpy()
+    elif EQ == 'MMSE':
+        rx_sym = MMSE_equalization(H_est, out_sig, opt.M*noise_pwr).detach().cpu().numpy()
     
-    rx_sym = rx.detach().cpu().numpy()
     rx_sym= rx_sym[...,0] + rx_sym[...,1] * 1j
-    
 
     # Decoding and demodulation
     if CHANNEL_CODE == 'LDPC':
         
+        H_est = H_est.repeat(1,1,opt.S,1,1).detach().cpu().numpy()
+        H_est = H_est[...,0] + H_est[...,1] * 1j
+        out_sig = out_sig.detach().cpu().numpy()
+        out_sig = out_sig[...,0] + out_sig[...,1] * 1j
+        noise_pwr = noise_pwr.repeat(1,opt.P,opt.S,opt.M).detach().cpu().numpy()
+
         rx_list = []
         for i in range(opt.N):
-            LLR = qam.LLR(rx_sym[i].flatten(), 0, simple = True)
+            #LLR = qam.LLR(rx_sym[i].flatten(), 0, simple = True)
+            #LLR = qam.LLR_OFDM(out_sig[i].flatten(), H_est[i].flatten(), opt.M*noise_pwr[i].flatten())
+            LLR = qam.LLR_dist(rx_sym[i].flatten())
             LLR[LLR>10] = 10
             LLR[LLR<-10] = -10
             rx_bits_tmp = ldpc.dec(LLR)
             rx_list.append(rx_bits_tmp)
         rx_bits = np.hstack(rx_list)
+
     elif CHANNEL_CODE == 'NONE':
         rx_bits = qam.Demodulation(rx_sym.flatten())
 
-    BER = np.sum(rx_bits!=tx_bits)/(opt.N*k)
+    BER = np.sum(abs(rx_bits-tx_bits))/(opt.N*k)
     print("BER: %f" % (BER))
 
 

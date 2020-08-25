@@ -22,7 +22,7 @@ opt.gan_mode = 'none'       # 'wgangp', 'lsgan', 'vanilla', 'none'
 
 opt.n_layers_D = 3
 opt.label_smooth = 1          # Label smoothing factor (for lsgan and vanilla gan only)
-
+ 
 opt.C_channel = 16            # The output channel number of encoder (Important: it controls the rate)
 opt.n_downsample= 2           # Downsample times 
 opt.n_blocks = 2              # Numebr of residual blocks
@@ -33,22 +33,22 @@ opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
 
 
 # Set up the training procedure
-opt.batchSize = 64          # batch size
+opt.batchSize = 64           # batch size
 opt.n_epochs = 300           # # of epochs without lr decay
-opt.n_epochs_decay = 400     # # of epochs with lr decay
+opt.n_epochs_decay = 300     # # of epochs with lr decay
 opt.lr = 5e-4                # Initial learning rate
 opt.lr_policy = 'linear'     # decay policy.  Availability:  see options/train_options.py
 opt.beta1 = 0.5              # parameter for ADAM
 
 
 # Set up the loss function
-opt.lambda_L2 = 50       # The weight for L2 loss
+opt.lambda_L2 = 128       # The weight for L2 loss
 opt.is_Feat = False      # Whether to use feature matching loss or not
 opt.lambda_feat = 1
 
 
 ##############################################################################################################
-
+ 
 
 if opt.gan_mode == 'wgangp':
     opt.norm_D = 'instance'   # Use instance normalization when using WGAN.  Available: 'instance', 'batch', 'none'
@@ -97,8 +97,8 @@ opt.L = 8                                   # Number of paths
 opt.decay = 4
 opt.S = size_after_compress//opt.M          # Number of packets
 
-opt.is_clip = False
-opt.PAPR = 5
+opt.is_clip = True
+opt.CR = 1
 
 opt.is_cfo = False
 opt.is_trick = True
@@ -106,7 +106,7 @@ opt.is_cfo_random = False
 opt.max_ang = 1.7
 opt.ang = 1.7
 
-opt.is_feedback = False
+opt.is_feedback = True
 
 opt.SNR = 15
 opt.N_pilot = 2   # Number of pilots for chanenl estimation
@@ -114,7 +114,7 @@ opt.N_pilot = 2   # Number of pilots for chanenl estimation
 opt.CE = 'LMMSE'  # Channel Estimation Method
 opt.EQ = 'MMSE'   # Equalization Method
 
-opt.feedforward = 'PLAIN'
+opt.feedforward = 'RESIDUAL'
 
 if opt.CE not in ['LS', 'LMMSE', 'TRUE']:
     raise Exception("Channel estimation method not implemented")

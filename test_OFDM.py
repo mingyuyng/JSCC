@@ -55,7 +55,7 @@ if opt.dataset_mode == 'CIFAR10':
         [transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
-    testset = torchvision.datasets.CIFAR10(root='./data', train=True,
+    testset = torchvision.datasets.CIFAR10(root='./data', train=False,
                                             download=True, transform=transform)
     dataset = torch.utils.data.DataLoader(testset, batch_size=opt.batchSize,
                                              shuffle=False, num_workers=2)
@@ -78,15 +78,15 @@ else:
 size_after_compress = (opt.size//(opt.n_downsample**2))**2 * (opt.C_channel//2)
 
 opt.N = opt.batchSize                       # Batch size
-opt.S = 1                                   # Number of symbols
+opt.P = 1                                   # Number of symbols
 opt.M = 64                                  # Number of subcarriers per symbol
 opt.K = 16                                  # Length of CP
 opt.L = 8                                   # Number of paths
 opt.decay = 4
-opt.P = size_after_compress//opt.M          # Number of packets
+opt.S = size_after_compress//opt.M          # Number of packets
 
 opt.is_clip = False
-opt.PAPR = 5
+opt.CR = 1
 
 opt.is_cfo = False
 opt.is_trick = True
@@ -94,15 +94,15 @@ opt.is_cfo_random = False
 opt.max_ang = 1.7
 opt.ang = 1.7
 
-opt.is_feedback = False
+opt.is_feedback = True
 
 opt.SNR = 15
 opt.N_pilot = 2   # Number of pilots for chanenl estimation
 
 opt.CE = 'LMMSE'  # Channel Estimation Method
 opt.EQ = 'MMSE'   # Equalization Method
-
-opt.feedforward = 'PLAIN'
+ 
+opt.feedforward = 'RESIDUAL'
 
 if opt.CE not in ['LS', 'LMMSE', 'TRUE']:
     raise Exception("Channel estimation method not implemented")
@@ -125,8 +125,8 @@ output_path = './Images/' +  opt.dataset_mode + '_OFDM/' + opt.name
 opt.model = 'StoGANOFDM'
 
 
-opt.num_test = 2000
-opt.how_many_channel = 5
+opt.num_test = 5000
+opt.how_many_channel = 10
 opt.N = opt.how_many_channel
 model = create_model(opt)      # create a model given opt.model and other options
 model.setup(opt)               # regular setup: load and print networks; create schedulers
@@ -153,43 +153,59 @@ for i, data in enumerate(dataset):
     elif opt.dataset_mode == 'CelebA':
         input = data['data']
 
-    model.set_encode(input.repeat(opt.how_many_channel,1,1,1))       # unpack data from data loader
-    if opt.is_feedback:
-        cof, _ = model.channel.channel.sample(opt.how_many_channel, opt.P, opt.M, opt.L)  # Sample multipath channels
-    else:
-        cof = None
+    model.set_input(input.repeat(opt.how_many_channel,1,1,1)) 
+    model.forward()
+    fake = model.fake
+    #model.set_encode(input.repeat(opt.how_many_channel,1,1,1))       # unpack data from data loader
+    #if opt.is_feedback:
+    #    cof, _ = model.channel.sample(opt.how_many_channel)  # Sample multipath channels
+    #else:
+    #    cof = None
 
-    latent = model.get_encoded(cof)
+    #latent = model.get_encoded(cof)
     
-    out_pilot, out_sig, H_true, noise_pwr = model.get_pass_channel(latent, cof)
+    #out_pilot, out_sig, H_true, noise_pwr = model.get_pass_channel(latent, cof)
+    
+    #H_est, rx = chan.OFDM_receiver(opt.CE, opt.EQ, out_sig, out_pilot, model.channel.pilot, opt.M*noise_pwr, H_true=H_true)
+    
+    #if opt.feedforward == 'PLAIN':
+    #    fake = model.netG(rx.permute(0,1,2,4,3).contiguous().view(latent.shape))
+    #elif opt.feedforward == 'RESIDUAL':
+    #    fake = model.netG(torch.cat((rx, H_est, out_pilot), 1).contiguous().permute(0,1,2,4,3).view(latent.shape))
+    #elif opt.feedforward == 'IMPLICIT_EQ':
+    #    N, C, H, W = latent.shape
+    #    dec_in = torch.cat((out_sig, H_est, out_pilot), 1).contiguous().permute(0,1,2,4,3).view(N, -1, H, W)
+    #    fake = model.netG(dec_in)
 
     # Channel estimation
-    if opt.CE == 'LS':
-        H_est = chan.LS_channel_est(model.channel.pilot, out_pilot)
-    elif opt.CE == 'LMMSE':
-        H_est = chan.LMMSE_channel_est(model.channel.pilot, out_pilot, opt.M*noise_pwr)
-    elif opt.CE == 'TRUE':
-        H_est = H_true.unsqueeze(2)
+    #if opt.CE == 'LS':
+    #    H_est = chan.LS_channel_est(model.channel.pilot, out_pilot)
+    #elif opt.CE == 'LMMSE':
+    #    H_est = chan.LMMSE_channel_est(model.channel.pilot, out_pilot, opt.M*noise_pwr)
+    #elif opt.CE == 'TRUE':
+    #    H_est = H_true.unsqueeze(2)
 
     # Equalization and decode
-    if opt.EQ == 'ZF':
-        rx = chan.ZF_equalization(H_est, out_sig)
-        fake = model.netG((rx.view(latent.shape)))
-    elif opt.EQ == 'MMSE':
-        rx = chan.MMSE_equalization(H_est, out_sig, opt.M*noise_pwr)
+    #if opt.EQ == 'ZF':
+    #    rx = chan.ZF_equalization(H_est, out_sig)
+    #    fake = model.netG((rx.view(latent.shape)))
+    #elif opt.EQ == 'MMSE':
+    #    rx = chan.MMSE_equalization(H_est, out_sig, opt.M*noise_pwr)
         #fake = model.netG(rx.view(latent.shape))
-        fake = model.netG((rx.view(latent.shape)))
-    elif opt.EQ == 'IMPLICIT':
-        N, C, H, W = latent.shape
-        dec_in = torch.cat((H_est, out_sig), 1).view(N, -1, H, W)
-        fake = model.netG(dec_in)
-    elif opt.EQ == 'MMSE+':
-        rx = chan.MMSE_equalization(H_est, out_sig, opt.M*noise_pwr)
-        fake = model.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape),out_pilot.view(latent.shape)), 1))
-    elif opt.EQ == 'ZF+':
-        rx = chan.ZF_equalization(H_est, out_sig)
-        fake = model.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape),out_pilot.view(latent.shape)), 1))
+    #    fake = model.netG((rx.view(latent.shape)))
+    #elif opt.EQ == 'IMPLICIT':
+    #    N, C, H, W = latent.shape
+    #    dec_in = torch.cat((H_est, out_sig), 1).view(N, -1, H, W)
+    #    fake = model.netG(dec_in)
+    #elif opt.EQ == 'MMSE+':
+    #    rx = chan.MMSE_equalization(H_est, out_sig, opt.M*noise_pwr)
+    #    fake = model.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape),out_pilot.view(latent.shape)), 1))
+    #elif opt.EQ == 'ZF+':
+     #   rx = chan.ZF_equalization(H_est, out_sig)
+    #    fake = model.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape),out_pilot.view(latent.shape)), 1))
 
+
+    #fake = fake - torch.mean(fake,(-2,-1),True) + torch.mean(input.cuda(), (-2,-1),True)
     # Get the int8 generated images
     img_gen_numpy = fake.detach().cpu().float().numpy()
     img_gen_numpy = (np.transpose(img_gen_numpy, (0, 2, 3, 1)) + 1) / 2.0 * 255.0
@@ -198,6 +214,7 @@ for i, data in enumerate(dataset):
     origin_numpy = input.detach().cpu().float().numpy()
     origin_numpy = (np.transpose(origin_numpy, (0, 2, 3, 1)) + 1) / 2.0 * 255.0
     origin_int8 = origin_numpy.astype(np.uint8)
+    
 
     diff = np.mean((np.float64(img_gen_int8)-np.float64(origin_int8))**2, (1,2,3))
 

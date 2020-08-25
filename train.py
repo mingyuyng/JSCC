@@ -38,13 +38,13 @@ opt.channel = 'awgn'          # Available channels: 'awgn', 'ofdm', 'bsc'
 opt.batchSize = 64           # batch size
 opt.n_epochs = 300           # # of epochs without lr decay
 opt.n_epochs_decay = 300     # # of epochs with lr decay
-opt.lr = 2e-4                # Initial learning rate
+opt.lr = 5e-4                # Initial learning rate
 opt.lr_policy = 'linear'     # decay policy.  Availability:  see options/train_options.py
 opt.beta1 = 0.5              # parameter for ADAM
 
 
 # Set up the loss function
-opt.lambda_L2 = 50       # The weight for L2 loss
+opt.lambda_L2 = 128       # The weight for L2 loss
 opt.is_Feat = False      # Whether to use feature matching loss or not
 opt.lambda_feat = 1
 
@@ -64,7 +64,9 @@ if opt.dataset_mode == 'CIFAR10':
     opt.dataroot='./data'
 
     transform = transforms.Compose(
-        [transforms.ToTensor(),
+        [transforms.RandomHorizontalFlip(p=0.5),
+        transforms.RandomCrop(32, padding=5, pad_if_needed=True, fill=0, padding_mode='reflect'),
+        transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
@@ -87,12 +89,12 @@ else:
 
 if opt.channel == 'bsc':
     opt.ber = 0.1             # Set the bit flip rate for bsc channel
-    opt.enc_type = 'prob'
+    opt.enc_type = 'hard'
     opt.sample_type = 'gumbel_softmax_hard'
     opt.temp = 0.5
     channel_name = '_BER'+str(opt.ber)+'_'+opt.enc_type+'_'+opt.sample_type
 elif opt.channel == 'awgn':
-    opt.SNR = 5               # Set the SNR for awgn channel
+    opt.SNR = 20               # Set the SNR for awgn channel
     channel_name = '_SNR'+str(opt.SNR)
 elif opt.channel == 'ofdm':
     pass

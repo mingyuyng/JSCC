@@ -8,6 +8,7 @@ from util.image_pool import ImagePool
 from .base_model import BaseModel
 from . import networks
 from . import channel
+import scipy.io as sio
 
 class StoGANOFDMModel(BaseModel):
     
@@ -33,19 +34,19 @@ class StoGANOFDMModel(BaseModel):
             C_decode = opt.C_channel + self.opt.N_pilot*self.opt.P*2 + self.opt.P*2
 
         if self.opt.is_feedback:
-            add_C = opt.C_channel
+            add_C = self.opt.P*2
         else:
             add_C = 0
-
+        
         # define networks (both generator and discriminator)
         self.netE = networks.define_OFDM_E(input_nc=opt.input_nc, ngf=opt.ngf, max_ngf=opt.max_ngf,
                                       n_downsample=opt.n_downsample, C_channel=opt.C_channel, 
-                                      n_blocks=opt.n_blocks, norm=opt.norm, init_type=opt.init_type,
-                                      init_gain=opt.init_gain, gpu_ids=self.gpu_ids, first_kernel=opt.first_kernel,first_add_C=add_C)
+                                      n_blocks=opt.n_blocks, norm=opt.norm_EG, init_type=opt.init_type,
+                                      init_gain=opt.init_gain, gpu_ids=self.gpu_ids, first_kernel=opt.first_kernel, first_add_C=add_C)
 
         self.netG = networks.define_G(output_nc=opt.output_nc, ngf=opt.ngf, max_ngf=opt.max_ngf,
                                       n_downsample=opt.n_downsample, C_channel=C_decode, 
-                                      n_blocks=opt.n_blocks, norm=opt.norm, init_type=opt.init_type,
+                                      n_blocks=opt.n_blocks, norm=opt.norm_EG, init_type=opt.init_type,
                                       init_gain=opt.init_gain, gpu_ids=self.gpu_ids, first_kernel=opt.first_kernel, activation=opt.activation)
 
         #if self.isTrain and self.is_GAN:  # define a discriminator; 
@@ -75,9 +76,10 @@ class StoGANOFDMModel(BaseModel):
         self.normalize = networks.Normalize()
         
         # Initialize the pilots and OFDM channel
-        self.pilot = torch.load('util/pilot.pt')
-        self.channel = channel.OFDM_channel(opt, self.device, pwr=1, pilot=self.pilot)
-
+        #self.pilot = torch.load('util/pilot.pt')
+        self.channel = channel.OFDM_channel(opt, self.device, pwr=1)
+        
+        #self.cof, _ = self.channel.sample(opt.N)
         
     def name(self):
         return 'StoGANOFDM_Model'
@@ -97,7 +99,7 @@ class StoGANOFDMModel(BaseModel):
         self.image_paths = path
         
     def forward(self):
-        
+
         N = self.real_A.shape[0]
         # Generate latent vector
         if self.opt.is_feedback:
@@ -109,7 +111,7 @@ class StoGANOFDMModel(BaseModel):
         else:
             cof = None
             latent = self.netE(self.real_A)
-
+            
         tx = latent.view(self.opt.N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
 
         # Normalization is contained in the channel
@@ -143,13 +145,16 @@ class StoGANOFDMModel(BaseModel):
 
         H_est, rx = channel.OFDM_receiver(self.opt.CE, self.opt.EQ, out_sig, out_pilot, self.channel.pilot, self.opt.M*noise_pwr, H_true=H_true)
 
+
         if self.opt.feedforward == 'PLAIN':
             self.fake = self.netG(rx.permute(0,1,2,4,3).contiguous().view(latent.shape))
+
         elif self.opt.feedforward == 'RESIDUAL':
-            self.fake = self.netG(torch.cat((rx, H_est, out_pilot), 1).contiguous().permute(0,1,2,4,3).view(latent.shape))
+            N, C, H, W = latent.shape
+            self.fake = self.netG(torch.cat((rx, H_est, out_pilot), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W))
         elif self.opt.feedforward == 'IMPLICIT_EQ':
             N, C, H, W = latent.shape
-            dec_in = torch.cat((out_sig, H_est, out_pilot), 1).contiguous().permute(0,1,2,4,3).view(N, -1, H, W)
+            dec_in = torch.cat((out_sig, H_est, out_pilot), 2).contiguous().permute(0,1,2,4,3).view(N, -1, H, W)
             self.fake = self.netG(dec_in)
 
 
@@ -195,8 +200,7 @@ class StoGANOFDMModel(BaseModel):
             self.loss_G_Feat = 0 
         
         
-        self.loss_G_L2 = self.criterionL2(self.fake, self.real_B) * self.opt.lambda_L2
-        
+        self.loss_G_L2 = self.criterionL2(self.fake, self.real_B) * self.opt.lambda_L2        
         # combine loss and calculate gradients
 
         self.loss_G = self.loss_G_GAN + self.loss_G_Feat + self.loss_G_L2
@@ -227,8 +231,8 @@ class StoGANOFDMModel(BaseModel):
     def get_encoded(self, cof):
     
         if cof is not None:
-            H = self.channel.get_LMMSE_estimation(self.opt.SNR, cof)            
-            latent = self.netE(self.real_A, H.cuda())
+            H = self.channel.get_channel_estimation(opt.CE, self.opt.SNR, cof.shape[0], cof).to(self.device)           
+            latent = self.netE(self.real_A, H)
         else:
             latent = self.netE(self.real_A)
 
@@ -237,7 +241,7 @@ class StoGANOFDMModel(BaseModel):
     def get_pass_channel(self, latent, cof):
 
         N = latent.shape[0]
-        tx = latent.view(N, self.opt.P, self.opt.S, self.opt.M, 2)
+        tx = latent.view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
         # Normalization is contained in the channel
         out_pilot, out_sig, H_true, noise_pwr = self.channel(tx, SNR=self.opt.SNR, cof=cof)
 
