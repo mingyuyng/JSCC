@@ -33,3 +33,11 @@ The basic coding framework is based on pix2pix [Github](https://github.com/junya
 * Support multiple pilots for channel estimation
 * Added three forward methods
 * Able to test the OFDM channel in models/test_OFDM.py
+
+## 08/25 update
+
+* Fixed a bug in OFDM system
+* Modified the clipping layer
+* Modified LLR calculation for baseline
+* Added QPSK symbols as pilots
+* Added scripts to train pure GAN 
