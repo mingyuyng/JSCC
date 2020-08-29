@@ -212,6 +212,11 @@ class Channel(nn.Module):
         if cof is None:
             cof = torch.sqrt(self.power/2) * torch.randn(N, P, self.opt.L, 2)       # NxPxLx2
 
+        #cof_r = torch.ones(N, P, 1, 1)
+        #cof_i = torch.zeros(N, P, 1, 1)
+
+        #cof = torch.cat((cof_r, cof_i), -1)
+
         cof_true = torch.cat((cof, torch.zeros((N,P,self.opt.M-self.opt.L,2))), 2)  
         H_true = torch.fft(cof_true, 1)  # NxPxLx2
 

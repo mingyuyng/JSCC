@@ -97,7 +97,7 @@ opt.L = 8                                   # Number of paths
 opt.decay = 4
 opt.S = size_after_compress//opt.M          # Number of packets
 
-opt.is_clip = True
+opt.is_clip = False
 opt.CR = 1
 
 opt.is_cfo = False
@@ -106,15 +106,15 @@ opt.is_cfo_random = False
 opt.max_ang = 1.7
 opt.ang = 1.7
 
-opt.is_feedback = True
+opt.is_feedback = False
 
-opt.SNR = 15
+opt.SNR = 5
 opt.N_pilot = 2   # Number of pilots for chanenl estimation
 
 opt.CE = 'LMMSE'  # Channel Estimation Method
 opt.EQ = 'MMSE'   # Equalization Method
 
-opt.feedforward = 'RESIDUAL'
+opt.feedforward = 'RESIDUAL+'
 
 if opt.CE not in ['LS', 'LMMSE', 'TRUE']:
     raise Exception("Channel estimation method not implemented")
@@ -122,7 +122,7 @@ if opt.CE not in ['LS', 'LMMSE', 'TRUE']:
 if opt.EQ not in ['ZF', 'MMSE']:
     raise Exception("Equalization method not implemented")
 
-if opt.feedforward not in ['PLAIN', 'RESIDUAL', 'IMPLICIT_EQ']:
+if opt.feedforward not in ['PLAIN', 'RESIDUAL', 'IMPLICIT_EQ', 'RESIDUAL+']:
     raise Exception("Forward method not implemented")
 
 # Display setting
