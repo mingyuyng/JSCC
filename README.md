@@ -41,3 +41,7 @@ The basic coding framework is based on pix2pix [Github](https://github.com/junya
 * Modified LLR calculation for baseline
 * Added QPSK symbols as pilots
 * Added scripts to train pure GAN 
+
+## 08/29 update
+
+* Add residual connections 
