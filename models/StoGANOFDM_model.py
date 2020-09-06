@@ -26,7 +26,7 @@ class StoGANOFDMModel(BaseModel):
         else:  # during test time, only load G
             self.model_names = ['E', 'G']
 
-        if self.opt.feedforward == 'RESIDUAL+':
+        if self.opt.feedforward == 'RESIDUAL+' or self.opt.feedforward == 'RESIDUAL++':
              self.model_names += ['R1', 'R2']
         
         if self.opt.feedforward == 'PLAIN' or self.opt.feedforward == 'RESIDUAL+':
@@ -35,6 +35,10 @@ class StoGANOFDMModel(BaseModel):
             C_decode = opt.C_channel + self.opt.N_pilot*self.opt.P*2 + self.opt.P*2
         elif self.opt.feedforward == 'IMPLICIT_EQ':
             C_decode = opt.C_channel + self.opt.N_pilot*self.opt.P*2 + self.opt.P*2
+        elif self.opt.feedforward == 'IMPLICIT':
+            C_decode = opt.C_channel + self.opt.N_pilot*self.opt.P*2 + self.opt.P*2
+        elif self.opt.feedforward == 'RESIDUAL++':
+            C_decode = opt.C_channel
 
         if self.opt.is_feedback:
             add_C = self.opt.P*2
@@ -63,7 +67,12 @@ class StoGANOFDMModel(BaseModel):
 
             self.netR2 = networks.define_RES(dim=(self.opt.S+1)*self.opt.P*2, dim_out=self.opt.S*self.opt.P*2,
                                         norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
+        elif self.opt.feedforward == 'RESIDUAL++':
+            self.netR1 = networks.define_RES(dim=(self.opt.N_pilot*self.opt.P+1)*2, dim_out=self.opt.P*2,
+                                        norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
 
+            self.netR2 = networks.define_RES(dim=(self.opt.S+2)*self.opt.P*2, dim_out=self.opt.S*self.opt.P*2,
+                                        norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
 
         print('---------- Networks initialized -------------')
 
@@ -75,7 +84,7 @@ class StoGANOFDMModel(BaseModel):
 
             params = list(self.netE.parameters()) + list(self.netG.parameters())
 
-            if self.opt.feedforward == 'RESIDUAL+':
+            if self.opt.feedforward == 'RESIDUAL+' or self.opt.feedforward == 'RESIDUAL++':
                 params+=list(self.netR1.parameters()) + list(self.netR2.parameters())
 
             self.optimizer_G = torch.optim.Adam(params, lr=opt.lr, betas=(opt.beta1, 0.999))
@@ -126,79 +135,69 @@ class StoGANOFDMModel(BaseModel):
             cof = None
             latent = self.netE(self.real_A)
             
-        tx = latent.view(self.opt.N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
+        self.tx = latent.view(self.opt.N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
 
         # Normalization is contained in the channel
-        out_pilot, out_sig, H_true, noise_pwr = self.channel(tx, SNR=self.opt.SNR, cof=cof)
+        out_pilot, out_sig, self.H_true, noise_pwr, self.PAPR1, self.PAPR2 = self.channel(self.tx, SNR=self.opt.SNR, cof=cof)
+        N, C, H, W = latent.shape
 
-        # Channel estimation
-        #if self.opt.CE == 'LS':
-        #    H_est = channel.LS_channel_est(self.channel.pilot, out_pilot)
-        #elif self.opt.CE == 'LMMSE':
-        #    H_est = channel.LMMSE_channel_est(self.channel.pilot, out_pilot, self.opt.M*noise_pwr)
-        #elif self.opt.CE == 'TRUE':
-        #    H_est = H_true.unsqueeze(2)
-
-        # Equalization and decode
-        #if self.opt.EQ == 'ZF':
-        #    rx = channel.ZF_equalization(H_est, out_sig)
-        #    self.fake = self.netG((rx.view(latent.shape)))
-        #elif self.opt.EQ == 'MMSE':
-        #    rx = channel.MMSE_equalization(H_est, out_sig, self.opt.M*noise_pwr)
-        #    self.fake = self.netG((rx.view(latent.shape)))
-        #elif self.opt.EQ == 'IMPLICIT':
-        #    N, C, H, W = latent.shape
-        #    dec_in = torch.cat((H_est, out_sig), 1).view(N, -1, H, W)
-        #    self.fake = self.netG(dec_in)
-        #elif self.opt.EQ == 'MMSE+':
-        #    rx = channel.MMSE_equalization(H_est, out_sig, self.opt.M*noise_pwr)
-        #    self.fake = self.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape), out_pilot.view(latent.shape)), 1))
-        #elif self.opt.EQ == 'ZF+':
-        #    rx = channel.ZF_equalization(H_est, out_sig)
-        #    self.fake = self.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape)), 1))
-
-        #H_est, rx = channel.OFDM_receiver(self.opt.CE, self.opt.EQ, out_sig, out_pilot, self.channel.pilot, self.opt.M*noise_pwr, H_true=H_true, net1=self.netR1, net2=self.netR2)
-
-        if self.opt.CE == 'LS':
-            H_est = channel.LS_channel_est(self.channel.pilot, out_pilot)
-        elif self.opt.CE == 'LMMSE':
-            H_est = channel.LMMSE_channel_est(self.channel.pilot, out_pilot, self.opt.M*noise_pwr)
-        elif self.opt.CE == 'TRUE':
-            H_est = H_true.unsqueeze(2).to(self.device)
-        else:
-            raise NotImplementedError('The channel estimation method [%s] is not implemented' % CE)
-        
-        if self.opt.feedforward == 'RESIDUAL+':
-            N, C, H, W = latent.shape
-            r1_input = torch.cat((self.channel.pilot.repeat(N,1,1,1,1), out_pilot), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
-            r1_output = self.netR1(r1_input).view(N, self.opt.P, 1, 2, self.opt.M).permute(0,1,2,4,3)
-            H_est += r1_output
-
-        if self.opt.EQ == 'ZF':
-            rx = channel.ZF_equalization(H_est, out_sig)
-        elif self.opt.EQ == 'MMSE':
-            rx = channel.MMSE_equalization(H_est, out_sig, self.opt.M*noise_pwr)
-        elif self.opt.EQ == 'None':
-            rx = None
-        else:
-            raise NotImplementedError('The equalization method [%s] is not implemented' % CE)
-        
-        if self.opt.feedforward == 'RESIDUAL+':
-            r2_input = torch.cat((H_est, out_sig), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
-            r2_output = self.netR2(r2_input).view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
-            rx += r2_output
-
-        if self.opt.feedforward == 'PLAIN' or self.opt.feedforward == 'RESIDUAL+':
-            self.fake = self.netG(rx.permute(0,1,2,4,3).contiguous().view(latent.shape))
-        elif self.opt.feedforward == 'RESIDUAL':
-            N, C, H, W = latent.shape
-            self.fake = self.netG(torch.cat((rx, H_est, out_pilot), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W))
-        elif self.opt.feedforward == 'IMPLICIT_EQ':
-            N, C, H, W = latent.shape
-            dec_in = torch.cat((out_sig, H_est, out_pilot), 2).contiguous().permute(0,1,2,4,3).view(N, -1, H, W)
+        if self.opt.feedforward == 'IMPLICIT':
+            r1 = self.channel.pilot.repeat(N,1,1,1,1)
+            r2 = out_pilot
+            r3 = out_sig
+            dec_in = torch.cat((r1, r2, r3), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
             self.fake = self.netG(dec_in)
+        else:
+            if self.opt.CE == 'LS':
+                self.H_est = channel.LS_channel_est(self.channel.pilot, out_pilot)
+            elif self.opt.CE == 'LMMSE':
+                self.H_est = channel.LMMSE_channel_est(self.channel.pilot, out_pilot, self.opt.M*noise_pwr)
+            elif self.opt.CE == 'TRUE':
+                self.H_est = H_true.unsqueeze(2).to(self.device)
+            else:
+                raise NotImplementedError('The channel estimation method [%s] is not implemented' % CE)
+        
+            if self.opt.feedforward == 'RESIDUAL+':
+                N, C, H, W = latent.shape
+                r1_input = torch.cat((self.channel.pilot.repeat(N,1,1,1,1), out_pilot), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
+                r1_output = self.netR1(r1_input).view(N, self.opt.P, 1, 2, self.opt.M).permute(0,1,2,4,3)
+                self.H_est += r1_output
+            elif self.opt.feedforward == 'RESIDUAL++':
+                N, C, H, W = latent.shape
+                r1_input = torch.cat((self.channel.pilot.repeat(N,1,1,1,1), out_pilot), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
+                r1_output = self.netR1(r1_input).view(N, self.opt.P, 1, 2, self.opt.M).permute(0,1,2,4,3)
+                #self.H_est += r1_output
 
+            if self.opt.EQ == 'ZF':
+                self.rx = channel.ZF_equalization(self.H_est, out_sig)
+            elif self.opt.EQ == 'MMSE':
+                self.rx = channel.MMSE_equalization(self.H_est, out_sig, self.opt.M*noise_pwr)
+            elif self.opt.EQ == 'None':
+                self.rx = None
+            else:
+                raise NotImplementedError('The equalization method [%s] is not implemented' % CE)
+        
+            if self.opt.feedforward == 'RESIDUAL+':
+                r2_input = torch.cat((self.H_est, out_sig), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
+                r2_output = self.netR2(r2_input).view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
+                self.rx += r2_output
+            elif self.opt.feedforward == 'RESIDUAL++':
+                r2_input = torch.cat((self.H_est, r1_output, out_sig), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
+                r2_output = self.netR2(r2_input).view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
+                #self.rx += r2_output
 
+            if self.opt.feedforward == 'PLAIN' or self.opt.feedforward == 'RESIDUAL+':
+                self.fake = self.netG(self.rx.permute(0,1,2,4,3).contiguous().view(latent.shape))
+            elif self.opt.feedforward == 'RESIDUAL':
+                N, C, H, W = latent.shape
+                self.fake = self.netG(torch.cat((self.rx, self.H_est, out_pilot), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W))
+            elif self.opt.feedforward == 'IMPLICIT_EQ':
+                N, C, H, W = latent.shape
+                dec_in = torch.cat((out_sig, self.H_est, out_pilot), 2).contiguous().permute(0,1,2,4,3).view(N, -1, H, W)
+                self.fake = self.netG(dec_in)
+            elif self.opt.feedforward == 'RESIDUAL++':
+                #self.fake = self.netG(torch.cat((self.rx, r2_output), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W))
+                self.fake = self.netG(self.rx.contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W))
 
     def backward_D(self):
         """Calculate GAN loss for the discriminator"""
@@ -268,26 +267,21 @@ class StoGANOFDMModel(BaseModel):
     def get_channel(self):
         cof, _ = self.channel.sample()
         return cof
+    
+
+    def MSE_calculation(self):
+        H_err = torch.mean((self.H_est-self.H_true.unsqueeze(2).cuda())**2, (-2,-1))*2
+        x_err = torch.mean((self.rx-channel.Normalize(self.tx, 1)[0])**2, (-3,-2,-1))*2
+    
+        return H_err, x_err
+
 
     def get_encoded(self, cof):
-    
-        if cof is not None:
-            H = self.channel.get_channel_estimation(opt.CE, self.opt.SNR, cof.shape[0], cof).to(self.device)           
-            latent = self.netE(self.real_A, H)
-        else:
-            latent = self.netE(self.real_A)
-
-        return latent
+        pass
 
     def get_pass_channel(self, latent, cof):
-
-        N = latent.shape[0]
-        tx = latent.view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
-        # Normalization is contained in the channel
-        out_pilot, out_sig, H_true, noise_pwr = self.channel(tx, SNR=self.opt.SNR, cof=cof)
-
-        return out_pilot, out_sig, H_true, noise_pwr
+        pass
 
     def get_decoded(self, latent):
-        self.fake = self.netG(latent)
+        pass
 

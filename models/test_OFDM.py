@@ -13,12 +13,13 @@ import time
 import math
 from channel import *
 import types
+from scipy import special
 
 ##########################################################################################################
 # OFDM experiments with LDPC included
 # Each packet carriers one LDPC codeword
 
-
+PI = 3.1415926
 # Set up modulation scheme (2 -> QPSK, 4 -> 16QAM, 8-> 64QAM)
 N_bit = 2
 qam = QAM(Ave_Energy=1, B=N_bit)
@@ -56,7 +57,7 @@ qam = QAM(Ave_Energy=1, B=N_bit)
 ################################################################################
 
 opt = types.SimpleNamespace()
-opt.N = 200       # Batch size
+opt.N = 1000       # Batch size
 opt.P = 1          # Number of packets  (Keep this as 1 for now)
 opt.S = 4          # Number of symbols
 opt.M = 64         # Number of subcarriers per symbol
@@ -67,18 +68,22 @@ opt.decay = 4
 opt.is_clip = True    # Whether to clip the OFDM signal or not
 opt.CR = 1             # Clipping Ratio
 
+alpha = 0.7846
+sigma = 0.0365
+
 opt.is_cfo = False     # Whether to add CFO to the OFDM signal (not used for the experiment yet)
 opt.is_trick = True
 opt.is_cfo_random = False
 opt.max_ang = 1.7
 opt.ang = 1.7
 
-opt.N_pilot = 2        # Number of pilots for channel estimation
+opt.N_pilot = 2           # Number of pilots for channel estimation
+opt.pilot = 'ZadoffChu'   # QPSK or ZadoffChu
 
 opt.gpu_ids = ['0']    # GPU setting
 
-CE = 'LMMSE'       # Channel Estimation Method
-EQ = 'MMSE'         # Equalization Method
+CE = 'TRUE'         # Channel Estimation Method
+EQ = 'MMSE'          # Equalization Method
 CHANNEL_CODE = 'LDPC'   # Channel Coding 
 
 if CE not in ['LS', 'LMMSE', 'TRUE']:
@@ -146,7 +151,7 @@ for idx in range(SNR_list.shape[0]):
     tx = torch.from_numpy(tx).float().to(device)
     
     # Pass the OFDM channel 
-    out_pilot, out_sig, H_true, noise_pwr = ofdm_channel(tx, SNR=SNR)
+    out_pilot, out_sig, H_true, noise_pwr, _, _ = ofdm_channel(tx, SNR=SNR)
 
     # Channel Estimation
     if CE == 'LS':
@@ -178,7 +183,7 @@ for idx in range(SNR_list.shape[0]):
         rx_list = []
         for i in range(opt.N):
             #LLR = qam.LLR(rx_sym[i].flatten(), 0, simple = True)
-            #LLR = qam.LLR_OFDM(out_sig[i].flatten(), H_est[i].flatten(), opt.M*noise_pwr[i].flatten())
+            #LLR = qam.LLR_OFDM_clip(out_sig[i].flatten(), H_est[i].flatten(), opt.M*noise_pwr[i].flatten(), alpha, sigma)
             LLR = qam.LLR_dist(rx_sym[i].flatten())
             LLR[LLR>10] = 10
             LLR[LLR<-10] = -10

@@ -80,7 +80,6 @@ class QAM():
                 sym_0 = self.map[f(pos_0)]*self.unit
                 sym_1 = self.map[f(pos_1)]*self.unit
 
-                
                 prob_0_real = np.sum(np.exp(-(sym.real - sym_0)**2/(sigma**2)))
                 prob_1_real = np.sum(np.exp(-(sym.real - sym_1)**2/(sigma**2)))
 
@@ -145,7 +144,7 @@ class QAM():
         return np.hstack(LLR)
 
 
-    def LLR_OFDM(self, y, H, sigma2,eps=1e-50):
+    def LLR_OFDM(self, y, H, sigma2, eps=1e-50):
         # LLR calculation for OFDM system
         # Used when we have perfect channel knowledge
         # y: received symbols
@@ -167,9 +166,40 @@ class QAM():
                     symbols_0 = XH[:, ind==0]
                     symbols_1 = XH[:, ind==1]
 
-                prob_0 = np.sum(np.exp(-((sym.real-symbols_0.real)**2+(sym.imag-symbols_0.imag)**2)/(sigma2[m]/2)))
-                prob_1 = np.sum(np.exp(-((sym.real-symbols_1.real)**2+(sym.imag-symbols_1.imag)**2)/(sigma2[m]/2)))
+                prob_0 = np.sum(np.exp(-((sym.real-symbols_0.real)**2+(sym.imag-symbols_0.imag)**2)/(sigma2[m])))
+                prob_1 = np.sum(np.exp(-((sym.real-symbols_1.real)**2+(sym.imag-symbols_1.imag)**2)/(sigma2[m])))
 
+                ratio = np.log(prob_0+eps) - np.log(prob_1+eps)
+                
+                LLR.append(ratio)
+
+        return np.hstack(LLR)
+
+    def LLR_OFDM_clip(self, y, H, sigma2, alpha, sigma, eps=1e-50):
+        # LLR calculation for OFDM system
+        # Used when we have perfect channel knowledge
+        # y: received symbols
+        # H: estimated channel frequency response
+
+        M = y.shape[0]
+        LLR = []
+        for m in range(M):
+            sym = y[m]
+            XH = alpha * H[m] * self.constellation            
+            for i in range(self.B):
+
+                if i < self.B//2:
+                    ind = self.map2[:, i%(self.B//2)]
+                    symbols_0 = XH[ind==0, :]
+                    symbols_1 = XH[ind==1, :]
+                else:
+                    ind = self.map2[:, i%(self.B//2)]
+                    symbols_0 = XH[:, ind==0]
+                    symbols_1 = XH[:, ind==1]
+ 
+                prob_0 = np.sum(np.exp(-((sym.real-symbols_0.real)**2+(sym.imag-symbols_0.imag)**2)/(sigma2[m]+abs(H[m])**2*sigma)))
+                prob_1 = np.sum(np.exp(-((sym.real-symbols_1.real)**2+(sym.imag-symbols_1.imag)**2)/(sigma2[m]+abs(H[m])**2*sigma)))
+                
                 ratio = np.log(prob_0+eps) - np.log(prob_1+eps)
                 
                 LLR.append(ratio)

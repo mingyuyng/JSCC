@@ -101,8 +101,9 @@ opt.N_pilot = 2   # Number of pilots for chanenl estimation
 
 opt.CE = 'LMMSE'  # Channel Estimation Method
 opt.EQ = 'MMSE'   # Equalization Method
- 
-opt.feedforward = 'PLAIN'
+opt.pilot = 'ZadoffChu'
+
+opt.feedforward = 'RESIDUAL+'
 
 if opt.CE not in ['LS', 'LMMSE', 'TRUE']:
     raise Exception("Channel estimation method not implemented")
@@ -110,7 +111,7 @@ if opt.CE not in ['LS', 'LMMSE', 'TRUE']:
 if opt.EQ not in ['ZF', 'MMSE']:
     raise Exception("Equalization method not implemented")
 
-if opt.feedforward not in ['PLAIN', 'RESIDUAL', 'IMPLICIT_EQ', 'RESIDUAL+']:
+if opt.feedforward not in ['PLAIN', 'RESIDUAL', 'IMPLICIT_EQ', 'RESIDUAL+', 'RESIDUAL++','IMPLICIT']:
     raise Exception("Forward method not implemented")
 
 
@@ -120,12 +121,12 @@ opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.CE + '_' + opt.E
 
 output_path = './Images/' +  opt.dataset_mode + '_OFDM/' + opt.name
 
-opt.is_clip = True
+opt.is_clip = False
 # Choose the neural network model
 opt.model = 'StoGANOFDM'
 
 
-opt.num_test = 5000
+opt.num_test = 10000
 opt.how_many_channel = 10
 opt.N = opt.how_many_channel
 model = create_model(opt)      # create a model given opt.model and other options
@@ -142,6 +143,8 @@ else:
 
 PSNR_list = []
 SSIM_list = []
+H_err_list = []
+x_err_list = []
 for i, data in enumerate(dataset):
     if i >= opt.num_test:  # only apply our model to opt.num_test images.
         break
@@ -156,54 +159,13 @@ for i, data in enumerate(dataset):
     model.set_input(input.repeat(opt.how_many_channel,1,1,1)) 
     model.forward()
     fake = model.fake
-    #model.set_encode(input.repeat(opt.how_many_channel,1,1,1))       # unpack data from data loader
-    #if opt.is_feedback:
-    #    cof, _ = model.channel.sample(opt.how_many_channel)  # Sample multipath channels
-    #else:
-    #    cof = None
-
-    #latent = model.get_encoded(cof)
     
-    #out_pilot, out_sig, H_true, noise_pwr = model.get_pass_channel(latent, cof)
+    #H_err, x_err = model.MSE_calculation()
+   #H_err, x_err = 0, 0
+    #H_err_list.append(torch.mean(H_err).item())
+    #x_err_list.append(torch.mean(x_err).item())
+    #print('CE: %.4f, EQ: %.4f' % (torch.mean(H_err).item(), torch.mean(x_err).item()))
     
-    #H_est, rx = chan.OFDM_receiver(opt.CE, opt.EQ, out_sig, out_pilot, model.channel.pilot, opt.M*noise_pwr, H_true=H_true)
-    
-    #if opt.feedforward == 'PLAIN':
-    #    fake = model.netG(rx.permute(0,1,2,4,3).contiguous().view(latent.shape))
-    #elif opt.feedforward == 'RESIDUAL':
-    #    fake = model.netG(torch.cat((rx, H_est, out_pilot), 1).contiguous().permute(0,1,2,4,3).view(latent.shape))
-    #elif opt.feedforward == 'IMPLICIT_EQ':
-    #    N, C, H, W = latent.shape
-    #    dec_in = torch.cat((out_sig, H_est, out_pilot), 1).contiguous().permute(0,1,2,4,3).view(N, -1, H, W)
-    #    fake = model.netG(dec_in)
-
-    # Channel estimation
-    #if opt.CE == 'LS':
-    #    H_est = chan.LS_channel_est(model.channel.pilot, out_pilot)
-    #elif opt.CE == 'LMMSE':
-    #    H_est = chan.LMMSE_channel_est(model.channel.pilot, out_pilot, opt.M*noise_pwr)
-    #elif opt.CE == 'TRUE':
-    #    H_est = H_true.unsqueeze(2)
-
-    # Equalization and decode
-    #if opt.EQ == 'ZF':
-    #    rx = chan.ZF_equalization(H_est, out_sig)
-    #    fake = model.netG((rx.view(latent.shape)))
-    #elif opt.EQ == 'MMSE':
-    #    rx = chan.MMSE_equalization(H_est, out_sig, opt.M*noise_pwr)
-        #fake = model.netG(rx.view(latent.shape))
-    #    fake = model.netG((rx.view(latent.shape)))
-    #elif opt.EQ == 'IMPLICIT':
-    #    N, C, H, W = latent.shape
-    #    dec_in = torch.cat((H_est, out_sig), 1).view(N, -1, H, W)
-    #    fake = model.netG(dec_in)
-    #elif opt.EQ == 'MMSE+':
-    #    rx = chan.MMSE_equalization(H_est, out_sig, opt.M*noise_pwr)
-    #    fake = model.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape),out_pilot.view(latent.shape)), 1))
-    #elif opt.EQ == 'ZF+':
-     #   rx = chan.ZF_equalization(H_est, out_sig)
-    #    fake = model.netG(torch.cat((rx.view(latent.shape), H_est.view(latent.shape),out_pilot.view(latent.shape)), 1))
-
 
     #fake = fake - torch.mean(fake,(-2,-1),True) + torch.mean(input.cuda(), (-2,-1),True)
     # Get the int8 generated images
@@ -234,8 +196,12 @@ for i, data in enumerate(dataset):
 
     save_path = output_path + '/' + str(i) + '.png'
     util.save_image(util.tensor2im(input), save_path, aspect_ratio=1)
-    print(i)
+    #print('PSNR: %.3f, SSIM: %.3f' % (PSNR_list[-1], SSIM_list[-1]))
+    if i%100 == 0:
+        print(i)
+
 
 print('PSNR: '+str(np.mean(PSNR_list)))
 print('SSIM: '+str(np.mean(SSIM_list)))
-
+print('MSE CE: '+str(np.mean(H_err_list)))
+print('MSE EQ: '+str(np.mean(x_err_list)))

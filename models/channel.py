@@ -320,15 +320,20 @@ class OFDM_channel(nn.Module):
 
         self.cfo = Add_CFO(opt)
 
-        # Generate the pilot signal
-        if not os.path.exists('Pilot_bit.pt'):
-            #pilot = ZadoffChu(order=1, length=opt.M)
-            bits = torch.randint(2, (opt.M,2))
-            torch.save(bits,'Pilot_bit.pt')
-            pilot = (2*bits-1).float()
-        else:
-            bits = torch.load('Pilot_bit.pt')
-            pilot = (2*bits-1).float()
+       # Generate the pilot signal
+        if opt.pilot == 'QPSK':
+            if not os.path.exists('Pilot_bit.pt'):
+                bits = torch.randint(2, (opt.M,2))
+                torch.save(bits,'Pilot_bit.pt')
+                pilot = (2*bits-1).float()
+            else:
+                bits = torch.load('Pilot_bit.pt')
+                pilot = (2*bits-1).float()
+        elif opt.pilot == 'ZadoffChu':
+            if not os.path.exists('pilot.pt'):
+                pilot = ZadoffChu(order=1, length=opt.M)
+            else:
+                pilot = torch.load('pilot.pt').squeeze()
         
         self.pilot, _ = Normalize(pilot, pwr=pwr)
         
@@ -352,7 +357,6 @@ class OFDM_channel(nn.Module):
 
         y, H_true = self.channel(tx, cof, False)
         
-
         # Calculate the power of received signal
         pwr = torch.mean(y**2, (-2,-1), True) * 2
         noise_pwr = pwr*10**(-SNR/10)
@@ -378,6 +382,20 @@ class OFDM_channel(nn.Module):
         else:
             raise NotImplementedError('The channel estimation method [%s] is not implemented' % CE)
 
+    def PAPR(self, x):
+        power1 = torch.mean(x**2, (-2,-1))*2
+        max1, _ = torch.max(torch.sum(x**2, -1), -1)
+
+        PAPR1 = 10*torch.log10(max1/power1)
+
+        x_tmp = x[..., self.opt.N_pilot*(self.opt.M+self.opt.K):, :]
+
+        power2 = torch.mean(x_tmp**2, (-2,-1))*2
+        max2, _= torch.max(torch.sum(x_tmp**2, -1), -1)
+        PAPR2 = 10*torch.log10(max2/power2)
+
+        return PAPR1, PAPR2
+
 
     def forward(self, x, SNR, cof=None):
         # Input size: NxPxSxMx2   The information to be transmitted
@@ -386,13 +404,15 @@ class OFDM_channel(nn.Module):
 
         # Normalize the input power in the frequency domain
         x, _ = Normalize(x, pwr=self.pwr)
+        
+        
 
         # IFFT:                    NxPxSxMx2  => NxPxSxMx2
         x = torch.ifft(x, 1)
 
         # Add Cyclic Prefix:       NxPxSxMx2  => NxPxSx(M+K)x2
         x = self.add_cp(x)
-        
+
         pilot = self.pilot_cp.repeat(N,1,1,1,1)
 
         # Add pilot:               NxPxSx(M+K)x2  => NxPx(S+1)x(M+K)x2
@@ -400,16 +420,23 @@ class OFDM_channel(nn.Module):
 
         # Reshape:                 NxPx(S+1)x(M+K)x2  => NxPx(S+1)(M+K)x2
         x = x.view(N, self.opt.P, (self.opt.S+self.opt.N_pilot)*(self.opt.M+self.opt.K), 2)
-
+        
+        PAPR1, PAPR2 = self.PAPR(x)
+        
+        #sio.savemat('vec1.mat', {'x1':torch.sum(x[0,0,:,:]**2, -1).detach().cpu().numpy()})
 
         # Clipping (Optional):     NxPx(S+1)(M+K)x2  => NxPx(S+1)(M+K)x2
         if self.opt.is_clip:
             x = self.clip(x)
 
+        #sio.savemat('vec2.mat', {'x2':torch.sum(x[0,0,:,:]**2, -1).detach().cpu().numpy()})
+
+        PAPR3, PAPR4 = self.PAPR(x)
+
         # Pass the Channel:        NxPx(S+1)(M+K)x2  =>  NxPx((S+1)(M+K)+L-1)x2
         y, H_true = self.channel(x, cof)
         
-
+        #sio.savemat('vec2.mat', {'x2':torch.sum(H_true[0,0,:,:]**2, -1).detach().cpu().numpy()})
         # Calculate the power of received signal
         pwr = torch.mean(y**2, (-2,-1), True) * 2
         noise_pwr = pwr*10**(-SNR/10)
@@ -438,7 +465,7 @@ class OFDM_channel(nn.Module):
         info_pilot = torch.fft(info_pilot, 1)
         info_sig = torch.fft(info_sig, 1)
 
-        return info_pilot, info_sig, H_true, noise_pwr
+        return info_pilot, info_sig, H_true, noise_pwr, PAPR1, PAPR2
 
 
 def OFDM_receiver(CE, EQ, x, pilot_rx, pilot_tx, noise_pwr, H_true=None):
