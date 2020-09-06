@@ -45,3 +45,8 @@ The basic coding framework is based on pix2pix [Github](https://github.com/junya
 ## 08/29 update
 
 * Add residual connections 
+
+## 09/05 update
+
+* Two kinds of pilots (QPSK, ZadoffChu)
+* New LLR calculation for baseline clipping
