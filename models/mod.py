@@ -42,11 +42,11 @@ class QAM():
             self.unit = np.sqrt(Ave_Energy/2)
         elif B == 4:
             self.map = np.array([-3, -1, 3, 1])
-            self.map2 = np.array([[0, 0], [0, 1], [1, 1], [1, 0]])
+            self.map2 = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
             self.unit = np.sqrt(Ave_Energy/10)
         elif B == 6:
             self.map = np.array([-7, -5, -1, -3, 7, 5, 1, 3])
-            self.map2 = np.array([[0, 0, 0], [0, 0, 1], [0, 1, 1], [0, 1, 0], [1, 1, 0], [1, 1, 1], [1, 0, 1], [1, 0, 0]])
+            self.map2 = np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1], [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]])
             self.unit = np.sqrt(4*Ave_Energy/163)
 
         self.inv_map_1 = np.zeros((B//2, 2**(B//2-1)))
@@ -154,13 +154,14 @@ class QAM():
         LLR = []
         for m in range(M):
             sym = y[m]
-            XH = H[m] * self.constellation            
+            XH = H[m] * self.constellation
             for i in range(self.B):
-
+                
                 if i < self.B//2:
                     ind = self.map2[:, i%(self.B//2)]
                     symbols_0 = XH[ind==0, :]
                     symbols_1 = XH[ind==1, :]
+                    
                 else:
                     ind = self.map2[:, i%(self.B//2)]
                     symbols_0 = XH[:, ind==0]

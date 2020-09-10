@@ -10,6 +10,9 @@ from torch.nn import functional as F
 from typing import List, Callable, Union, Any, TypeVar, Tuple
 from math import exp
 from torch.distributions.utils import broadcast_all, probs_to_logits, logits_to_probs, lazy_property, clamp_probs
+from torch.distributions.normal import Normal
+from torch.distributions import kl_divergence
+from models.functions import vq, vq_st
 
 # from torch import tensor as Tensor
 
@@ -462,36 +465,6 @@ class Generator(nn.Module):
             return 2*self.model(input)-1
 
 
-# Scaler soft/hard quantization
-
-class quantizer(nn.Module):
-    def __init__(self,center,Temp):
-        super(quantizer, self).__init__()
-        self.center = nn.Parameter(center)
-        self.register_parameter('center',self.center)
-        self.Temp = Temp
-    def forward(self, x, Q_type="None"):
-        if Q_type=="Soft":            
-            W_stack = torch.stack([x for _ in range(len(self.center))],dim=-1)
-            W_index = torch.argmin(torch.abs(W_stack-self.center),dim=-1)
-            W_hard = self.center[W_index]
-            smx = torch.softmax(-1.0*self.Temp*(W_stack-self.center)**2,dim=-1)
-            W_soft = torch.einsum('ijklm,m->ijkl',[smx,self.center])
-            with torch.no_grad():
-                w_bias = (W_hard - W_soft)
-            return w_bias + W_soft
-        elif Q_type=='None':
-            return x
-        elif Q_type == 'Hard':
-            W_stack = torch.stack([x for _ in range(len(self.center))], dim=-1)
-            W_index = torch.argmin(torch.abs(W_stack - self.center), dim=-1)
-            W_hard = self.center[W_index]
-            return W_hard
-    def update_Temp(self,new_temp):
-        self.Temp = new_temp
-    def update_center(self,new_center):
-        self.center = nn.Parameter(new_center)
-
 
 
 
@@ -633,40 +606,6 @@ class awgn_channel(nn.Module):
 ##################################################################################################################################
 
 
-class vector_quantizer(nn.Module):
-    def __init__(self,center,Temp):
-        super(vector_quantizer, self).__init__()
-        self.center = nn.Parameter(center)
-        self.register_parameter('center',self.center)
-        self.Temp = Temp
-    def forward(self, x,Q_type='None'):
-        x_ = x.view(x.shape[0],-1,4)
-        if Q_type=="Soft":
-            W_stack = torch.stack([x_ for _ in range(len(self.center))],dim=-1)
-            E = torch.norm(W_stack - self.center.transpose(1,0),2,dim=-2)
-            W_index = torch.argmin(E,dim=-1)
-            W_hard = self.center[W_index]
-            smx = torch.softmax(-1.0*self.Temp*E**2,dim=-1)
-            W_soft = torch.einsum('ijk,km->ijm',[smx,self.center])
-            with torch.no_grad():
-                w_bias = (W_hard - W_soft)
-            output = w_bias + W_soft
-        elif Q_type=='None':
-            output = x_
-        elif Q_type == 'Hard':
-            W_stack = torch.stack([x_ for _ in range(len(self.center))], dim=-1)
-            E = torch.norm(W_stack - self.center.transpose(1, 0), 2, dim=-2)
-            W_index = torch.argmin(E, dim=-1)
-            W_hard = self.center[W_index]
-            output =  W_hard
-            import pdb; pdb.set_trace()  # breakpoint 2a2b226a //
-
-        return output.view(x.shape), W_index.view(x.shape)
-    def update_Temp(self,new_temp):
-        self.Temp = new_temp
-    def update_center(self,new_center):
-        self.center = nn.Parameter(new_center)
-
 class ResnetBlock(nn.Module):
     """Define a Resnet block"""
 
@@ -807,58 +746,6 @@ class upsample_pad(nn.Module):
         return out
 
 
-
-class JSCC_encoder(nn.Module):
-    def __init__(self, n_channel=8):
-           
-        assert(n_channel>=0)
-        super(JSCC_encoder, self).__init__()
-
-        activation = nn.PReLU()
-        
-        sequence = [nn.Conv2d(3, 16, kernel_size=5, padding=2, stride=2), 
-                 activation,
-                 nn.Conv2d(16, 32, kernel_size=5, padding=2, stride=2), 
-                 activation,
-                 nn.Conv2d(32, 32, kernel_size=5, padding=2, stride=1), 
-                 activation,
-                 nn.Conv2d(32, 32, kernel_size=5, padding=2, stride=1), 
-                 activation,
-                 nn.Conv2d(32, n_channel, kernel_size=5, padding=2, stride=1), 
-                 activation]
-        
-        self.model = nn.Sequential(*sequence)
-        self.norm = Normalize()
-
-    def forward(self, input):
-        z =  self.model(input)
-        return  self.norm(z, 1)
-
-
-class JSCC_decoder(nn.Module):
-    def __init__(self, n_channel=8):
-           
-        assert(n_channel>=0)
-        super(JSCC_decoder, self).__init__()
-
-        activation = nn.PReLU()
-        
-        sequence = [nn.Conv2d(n_channel, 32, kernel_size=5, padding=2, stride=1), 
-                 activation,
-                 nn.Conv2d(32, 32, kernel_size=5, padding=2, stride=1), 
-                 activation,
-                 nn.Conv2d(32, 32, kernel_size=5, padding=2, stride=1), 
-                 activation,
-                 nn.ConvTranspose2d(32, 16, kernel_size=5, stride=2, padding=2, output_padding=1), 
-                 activation,
-                 nn.ConvTranspose2d(16, 3, kernel_size=5, stride=2, padding=2, output_padding=1), 
-                 nn.Sigmoid()]
-
-        self.model = nn.Sequential(*sequence)
-
-    def forward(self, input):
-
-        return  2*self.model(input)-1
 
 
 
@@ -1264,4 +1151,141 @@ def define_RES(dim, dim_out, norm='instance', init_type='kaiming', init_gain=0.0
     else:
         use_bias = norm_layer == nn.InstanceNorm2d
     net = RES(dim=dim, dim_out=dim_out, padding_type='zero', norm_layer=norm_layer, use_dropout=False, use_bias=use_bias)    
+    return init_net(net, init_type, init_gain, gpu_ids)
+
+
+
+###########################################################################################################################
+# VQVAE
+#######################################################################################
+class VQEmbedding(nn.Module):
+    def __init__(self, K, D):
+        super().__init__()
+        self.embedding = nn.Embedding(K, D)
+        self.embedding.weight.data.uniform_(-1./K, 1./K)
+
+    def forward(self, z_e_x):
+        z_e_x_ = z_e_x.permute(0, 2, 3, 1).contiguous()
+        latents = vq(z_e_x_, self.embedding.weight)
+        return latents
+
+    def straight_through(self, z_e_x):
+        z_e_x_ = z_e_x.permute(0, 2, 3, 1).contiguous()        
+        z_q_x_, indices = vq_st(z_e_x_, self.embedding.weight.detach())        
+        z_q_x = z_q_x_.permute(0, 3, 1, 2).contiguous()
+
+        z_q_x_bar_flatten = torch.index_select(self.embedding.weight,
+            dim=0, index=indices)
+        z_q_x_bar_ = z_q_x_bar_flatten.view_as(z_e_x_)
+        z_q_x_bar = z_q_x_bar_.permute(0, 3, 1, 2).contiguous()
+
+        return z_q_x, z_q_x_bar
+
+
+class Encoder_VQVAE(nn.Module):
+
+    def __init__(self, input_nc, ngf=64, max_ngf=512, n_blocks=2, n_downsampling=2, norm_layer=nn.BatchNorm2d, padding_type="reflect", first_kernel=7):
+        """Construct a Resnet-based generator
+
+        Parameters:
+            input_nc (int)      -- the number of channels in input images
+            ngf (int)           -- the number of filters in the first conv layer
+            norm_layer          -- normalization layer
+            use_dropout (bool)  -- if use dropout layers
+            n_blocks (int)      -- the number of ResNet blocks
+            padding_type (str)  -- the name of padding layer in conv layers: reflect | replicate | zero
+        """   
+        assert(n_downsampling>=0)
+        assert(n_blocks>=0)
+        super(Encoder_VQVAE, self).__init__()
+
+        if type(norm_layer) == functools.partial:
+            use_bias = norm_layer.func == nn.InstanceNorm2d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm2d
+
+        activation = nn.ReLU(True)
+        
+        model = [nn.ReflectionPad2d((first_kernel-1)//2),
+                 nn.Conv2d(input_nc, ngf, kernel_size=first_kernel, padding=0, bias=use_bias),
+                 norm_layer(ngf),
+                 activation]
+
+        # add downsampling layers
+        for i in range(n_downsampling):
+            mult = 2**i
+            model += [nn.Conv2d(min(ngf * mult,max_ngf), min(ngf * mult * 2,max_ngf), kernel_size=3, stride=2, padding=1, bias=use_bias),
+                      norm_layer(min(ngf * mult * 2, max_ngf)), activation]
+
+        # add ResNet blocks
+        mult = 2 ** n_downsampling
+        for i in range(n_blocks):  
+            model += [ResnetBlock(min(ngf * mult,max_ngf), padding_type=padding_type, norm_layer=norm_layer, use_dropout=False, use_bias=use_bias)]
+
+
+        self.model = nn.Sequential(*model)
+        
+    def forward(self, input):
+        z =  self.model(input)
+        return  z
+
+def define_VQVAE_E(input_nc, ngf, max_ngf, n_downsample, n_blocks, norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[], first_kernel=7):
+    net = None
+    norm_layer = get_norm_layer(norm_type=norm)
+    net = Encoder_VQVAE(input_nc=input_nc, ngf=ngf, max_ngf=max_ngf, n_blocks=n_blocks, n_downsampling=n_downsample, norm_layer=norm_layer, padding_type="reflect", first_kernel=first_kernel)    
+    return init_net(net, init_type, init_gain, gpu_ids)
+
+
+class Generator_VQVAE(nn.Module):
+    def __init__(self, output_nc, ngf=64, max_ngf=512, n_blocks=2, n_downsampling=2, norm_layer=nn.BatchNorm2d, padding_type="reflect", first_kernel=7, activation_='sigmoid'):
+        assert (n_blocks>=0)
+        assert(n_downsampling>=0)
+
+        super(Generator_VQVAE, self).__init__()
+
+        self.activation_ = activation_
+
+        if type(norm_layer) == functools.partial:
+            use_bias = norm_layer.func == nn.InstanceNorm2d
+        else:
+            use_bias = norm_layer == nn.InstanceNorm2d
+
+        activation = nn.ReLU(True)
+
+        mult = 2 ** n_downsampling
+        ngf_dim = min(ngf * mult, max_ngf)
+        model = []
+
+        for i in range(n_blocks):
+            model += [ResnetBlock(ngf_dim, padding_type=padding_type, norm_layer=norm_layer, use_dropout=False, use_bias=use_bias)]
+
+        for i in range(n_downsampling):
+            mult = 2 ** (n_downsampling - i)
+            model += [nn.ConvTranspose2d(min(ngf * mult,max_ngf), min(ngf * mult //2, max_ngf),
+                                         kernel_size=3, stride=2,
+                                         padding=1, output_padding=1,
+                                         bias=use_bias),
+                      norm_layer(min(ngf * mult //2, max_ngf)),
+                      activation]
+
+        model += [nn.ReflectionPad2d((first_kernel-1)//2), nn.Conv2d(ngf, output_nc, kernel_size=first_kernel, padding=0)]
+
+        if activation_ == 'tanh':
+            model +=[nn.Tanh()]
+        elif activation_ == 'sigmoid':
+            model +=[nn.Sigmoid()]
+
+        self.model = nn.Sequential(*model)
+
+    def forward(self, input):
+
+        if self.activation_=='tanh':
+            return self.model(input)
+        elif self.activation_=='sigmoid':
+            return 2*self.model(input)-1
+
+def define_VQVAE_G(output_nc, ngf, max_ngf, n_downsample, n_blocks, norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[], first_kernel=7, activation='sigmoid'):
+    net = None
+    norm_layer = get_norm_layer(norm_type=norm)
+    net = Generator_VQVAE(output_nc=output_nc, ngf=ngf, max_ngf=max_ngf, n_blocks=n_blocks, n_downsampling=n_downsample, norm_layer=norm_layer, padding_type="reflect", first_kernel=first_kernel, activation_=activation)    
     return init_net(net, init_type, init_gain, gpu_ids)

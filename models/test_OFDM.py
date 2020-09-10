@@ -21,7 +21,7 @@ from scipy import special
 
 PI = 3.1415926
 # Set up modulation scheme (2 -> QPSK, 4 -> 16QAM, 8-> 64QAM)
-N_bit = 2
+N_bit = 6
 qam = QAM(Ave_Energy=1, B=N_bit)
 
 # Set up the OFDM channel
@@ -57,15 +57,15 @@ qam = QAM(Ave_Energy=1, B=N_bit)
 ################################################################################
 
 opt = types.SimpleNamespace()
-opt.N = 1000       # Batch size
+#opt.N = 10         # Batch size
 opt.P = 1          # Number of packets  (Keep this as 1 for now)
-opt.S = 4          # Number of symbols
+opt.S = 8          # Number of symbols
 opt.M = 64         # Number of subcarriers per symbol
 opt.K = 16         # Length of CP
 opt.L = 8          # Number of paths
 opt.decay = 4
 
-opt.is_clip = True    # Whether to clip the OFDM signal or not
+opt.is_clip = False    # Whether to clip the OFDM signal or not
 opt.CR = 1             # Clipping Ratio
 
 alpha = 0.7846
@@ -78,9 +78,10 @@ opt.max_ang = 1.7
 opt.ang = 1.7
 
 opt.N_pilot = 2           # Number of pilots for channel estimation
-opt.pilot = 'ZadoffChu'   # QPSK or ZadoffChu
+opt.pilot = 'QPSK'   # QPSK or ZadoffChu
 
 opt.gpu_ids = ['0']    # GPU setting
+device = torch.device('cuda:{}'.format(opt.gpu_ids[0])) if opt.gpu_ids else torch.device('cpu')
 
 CE = 'TRUE'         # Channel Estimation Method
 EQ = 'MMSE'          # Equalization Method
@@ -95,27 +96,56 @@ if EQ not in ['ZF', 'MMSE']:
 if CHANNEL_CODE not in ['LDPC', 'NONE']:
     raise Exception("Channel coding method not implemented")
 
-# Calculate the number of target ldpc codeword length  
-n = opt.P*opt.S*opt.M*N_bit
+# Calculate the number of target ldpc codeword length
+N_syms = opt.P*opt.S*opt.M 
+N_bits = N_syms * N_bit
+a, b = 1, 2
+rate = a/b
+if rate == 1/2:
+    d_v, d_c = 2, 4
+elif rate == 1/3:
+    d_v, d_c = 2, 3
+elif rate == 2/3:
+    d_v, d_c = 2, 6
 
 # Set up channel code
 if CHANNEL_CODE == 'LDPC':
-    d_v = 2
-    d_c = 4
-    rate = 1-(d_v/d_c)
-    k = round(n*rate)
+    k = math.ceil(N_bits/b)*a
+    n = int(k/rate)
     ldpc = LDPC(d_v, d_c, k, maxiter=50)
 elif CHANNEL_CODE == 'NONE':
-    k = n
+    k = math.ceil(N_bits/b)*a
+    n = k
 
+# Generate information bits
+N_test = 100
+tx_bits = np.random.randint(2, size=(N_test, k))
+
+if CHANNEL_CODE == 'LDPC':
+    # Map the information bits to channel codes
+    tx_bits_c = np.zeros((N_test, n))
+    for i in range(N_test):
+        tx_bits_c[i,:] = ldpc.enc(tx_bits[i,:])
+elif CHANNEL_CODE == 'NONE':
+    tx_bits_c = tx_bits
+
+# Map the binary data to complex symbols
+N_trans = math.ceil(N_test*n/N_bits)
+remain_bits = N_trans*N_bits - N_test*n
+dummy = np.zeros(remain_bits)
+
+tx_bits_tmp = np.concatenate((tx_bits_c.flatten(),dummy),axis=0)
+tx_syms_complex = qam.Modulation(tx_bits_tmp).reshape(N_trans, opt.P, opt.S, opt.M)
+tx_syms_real = torch.from_numpy(tx_syms_complex.real).float().unsqueeze(-1).to(device)
+tx_syms_imag = torch.from_numpy(tx_syms_complex.imag).float().unsqueeze(-1).to(device)
+tx_syms = torch.cat((tx_syms_real, tx_syms_imag), dim=-1)
+
+opt.N = N_trans
 # Create the OFDM channel
-device = torch.device('cuda:{}'.format(opt.gpu_ids[0])) if opt.gpu_ids else torch.device('cpu')
-
-#pilot = torch.load('../util/pilot.pt')
 ofdm_channel = OFDM_channel(opt, device)
 SNR_list = np.arange(0,35,5)
 
-print('Total number of bits tested: %d' % (opt.N*k))
+print('Total number of bits tested: %d' % (N_test*k))
 print('Channel Estimation: ' + CE)
 print('Equalization: ' + EQ)
 print('Channel Coding: ' + CHANNEL_CODE)
@@ -129,29 +159,8 @@ for idx in range(SNR_list.shape[0]):
     SNR = SNR_list[idx]
     print('Processing SNR %d dB.......' % (SNR))
 
-    # Generate the bits to be transmitted
-    tx_bits = np.random.randint(2, size=k*opt.N)
-
-    if CHANNEL_CODE == 'LDPC':
-        tx_list = []    
-        for i in range(opt.N):
-            tx_bits_tmp = tx_bits[i*k:(i+1)*k]
-            tx_c = ldpc.enc(tx_bits_tmp)
-            tx_sym = np.expand_dims(qam.Modulation(tx_c), axis=1)
-            tx_tmp = np.concatenate((tx_sym.real, tx_sym.imag), axis=1)
-            tx_tmp = tx_tmp.reshape(1, opt.P, opt.S, opt.M, N_bit)
-            tx_list.append(tx_tmp)
-        tx = np.vstack(tx_list)
-    elif CHANNEL_CODE == 'NONE':
-        tx_sym = np.expand_dims(qam.Modulation(tx_bits), axis=1)
-        tx_tmp = np.concatenate((tx_sym.real, tx_sym.imag), axis=1)
-        tx = tx_tmp.reshape(opt.N, opt.P, opt.S, opt.M, N_bit)
-
-
-    tx = torch.from_numpy(tx).float().to(device)
-    
     # Pass the OFDM channel 
-    out_pilot, out_sig, H_true, noise_pwr, _, _ = ofdm_channel(tx, SNR=SNR)
+    out_pilot, out_sig, H_true, noise_pwr, _, _ = ofdm_channel(tx_syms, SNR=SNR)
 
     # Channel Estimation
     if CE == 'LS':
@@ -169,33 +178,41 @@ for idx in range(SNR_list.shape[0]):
     elif EQ == 'MMSE':
         rx_sym = MMSE_equalization(H_est, out_sig, opt.M*noise_pwr).detach().cpu().numpy()
     
-    rx_sym= rx_sym[...,0] + rx_sym[...,1] * 1j
+    rx_sym = rx_sym[...,0] + rx_sym[...,1] * 1j
+    rx_sym = rx_sym.flatten()[:N_test*n//N_bit+1]
+    
+    H_est = H_est.repeat(1,1,opt.S,1,1).detach().cpu().numpy()
+    H_est = H_est[...,0] + H_est[...,1] * 1j
+    H_est = H_est.flatten()[:N_test*n//N_bit+1]
 
+    out_sig = out_sig.detach().cpu().numpy()
+    out_sig = out_sig[...,0] + out_sig[...,1] * 1j
+    out_sig = out_sig.flatten()[:N_test*n//N_bit+1]
+
+    noise_pwr = noise_pwr.repeat(1,opt.P,opt.S,opt.M).detach().cpu().numpy()
+    noise_pwr = noise_pwr.flatten()[:N_test*n//N_bit+1]
+    
+    LLR = qam.LLR_OFDM(out_sig, H_est, opt.M*noise_pwr)[:N_test*n].reshape(N_test, n)
+    LLR = np.clip(LLR, -10, 10)
+    
     # Decoding and demodulation
+    rx_bits = np.zeros((N_test, k))
     if CHANNEL_CODE == 'LDPC':
-        
-        H_est = H_est.repeat(1,1,opt.S,1,1).detach().cpu().numpy()
-        H_est = H_est[...,0] + H_est[...,1] * 1j
-        out_sig = out_sig.detach().cpu().numpy()
-        out_sig = out_sig[...,0] + out_sig[...,1] * 1j
-        noise_pwr = noise_pwr.repeat(1,opt.P,opt.S,opt.M).detach().cpu().numpy()
-
-        rx_list = []
-        for i in range(opt.N):
-            #LLR = qam.LLR(rx_sym[i].flatten(), 0, simple = True)
-            #LLR = qam.LLR_OFDM_clip(out_sig[i].flatten(), H_est[i].flatten(), opt.M*noise_pwr[i].flatten(), alpha, sigma)
-            LLR = qam.LLR_dist(rx_sym[i].flatten())
-            LLR[LLR>10] = 10
-            LLR[LLR<-10] = -10
-            rx_bits_tmp = ldpc.dec(LLR)
-            rx_list.append(rx_bits_tmp)
-        rx_bits = np.hstack(rx_list)
-
+       
+        for i in range(N_test):
+            rx_bits[i,:] = ldpc.dec(LLR[i])
+            if i % 100 == 0:
+                print('DECODED: %d' % (i))
     elif CHANNEL_CODE == 'NONE':
-        rx_bits = qam.Demodulation(rx_sym.flatten())
-
-    BER = np.sum(abs(rx_bits-tx_bits))/(opt.N*k)
+        rx_bits[LLR<0] = 1
+    
+    BER = np.sum(abs(rx_bits-tx_bits))/(N_test*k)
     print("BER: %f" % (BER))
+    
+    correct_blocks = np.sum(np.sum(abs(rx_bits - tx_bits), 1)==0)
+    BlockER = correct_blocks/N_test
+    print("Block Error Rate: %f" % (1-BlockER))
+
 
 
 

@@ -403,7 +403,7 @@ class OFDM_channel(nn.Module):
         N = x.shape[0]
 
         # Normalize the input power in the frequency domain
-        x, _ = Normalize(x, pwr=self.pwr)
+        #x, _ = Normalize(x, pwr=self.pwr)
         
         
 

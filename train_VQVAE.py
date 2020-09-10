@@ -22,7 +22,7 @@ opt.gan_mode = 'none'       # 'wgangp', 'lsgan', 'vanilla', 'none'
 
 opt.n_layers_D = 3
 opt.label_smooth = 1          # Label smoothing factor (for lsgan and vanilla gan only)
- 
+
 opt.C_channel = 16            # The output channel number of encoder (Important: it controls the rate)
 opt.n_downsample= 2           # Downsample times 
 opt.n_blocks = 2              # Numebr of residual blocks
@@ -31,24 +31,23 @@ opt.first_kernel = 5          # The filter size of the first convolutional layer
 # Set the input dataset
 opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
 
-
 # Set up the training procedure
 opt.batchSize = 64           # batch size
-opt.n_epochs = 200           # # of epochs without lr decay
-opt.n_epochs_decay = 200     # # of epochs with lr decay
+opt.n_epochs = 80           # # of epochs without lr decay
+opt.n_epochs_decay = 80     # # of epochs with lr decay
 opt.lr = 5e-4                # Initial learning rate
 opt.lr_policy = 'linear'     # decay policy.  Availability:  see options/train_options.py
 opt.beta1 = 0.5              # parameter for ADAM
+opt.beta  = 1
+opt.K = 16
 
 
-# Set up the loss function
-opt.lambda_L2 = 128       # The weight for L2 loss
 opt.is_Feat = False      # Whether to use feature matching loss or not
 opt.lambda_feat = 1
 
 
 ##############################################################################################################
- 
+
 
 if opt.gan_mode == 'wgangp':
     opt.norm_D = 'instance'   # Use instance normalization when using WGAN.  Available: 'instance', 'batch', 'none'
@@ -60,17 +59,17 @@ opt.norm_EG = 'batch'
 
 if opt.dataset_mode == 'CIFAR10':
     opt.dataroot='./data'
-    opt.size = 32
+
     transform = transforms.Compose(
         [transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomCrop(opt.size, padding=5, pad_if_needed=True, fill=0, padding_mode='reflect'),
+        transforms.RandomCrop(32, padding=5, pad_if_needed=True, fill=0, padding_mode='reflect'),
         transforms.ToTensor(),
         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
                                             download=True, transform=transform)
     dataset = torch.utils.data.DataLoader(trainset, batch_size=opt.batchSize,
-                                             shuffle=True, num_workers=2, drop_last=True)
+                                             shuffle=True, num_workers=2)
     dataset_size = len(dataset)
     print('#training images = %d' % dataset_size)
 
@@ -78,63 +77,22 @@ elif opt.dataset_mode == 'CelebA':
     opt.dataroot = './data/celeba/CelebA_train'
     opt.load_size = 80
     opt.crop_size = 64
-    opt.size = 64
     dataset = create_dataset(opt)  # create a dataset given opt.dataset_mode and other options
     dataset_size = len(dataset)
     print('#training images = %d' % dataset_size)
 else:
     raise Exception('Not implemented yet')
 
-########################################  OFDM setting  ###########################################
 
-size_after_compress = (opt.size//(opt.n_downsample**2))**2 * (opt.C_channel//2)
-
-opt.N = opt.batchSize                       # Batch size
-opt.P = 1                                   # Number of symbols
-opt.M = 64                                  # Number of subcarriers per symbol
-opt.K = 16                                  # Length of CP
-opt.L = 8                                   # Number of paths
-opt.decay = 4
-opt.S = size_after_compress//opt.M          # Number of packets
-
-opt.is_clip = True
-opt.CR = 1
-
-opt.is_cfo = False
-opt.is_trick = True
-opt.is_cfo_random = False
-opt.max_ang = 1.7
-opt.ang = 1.7
-
-opt.is_feedback = False
-
-opt.SNR = 5
-opt.N_pilot = 2   # Number of pilots for chanenl estimation
-
-opt.CE = 'LMMSE'  # Channel Estimation Method
-opt.EQ = 'MMSE'   # Equalization Method
-
-opt.pilot = 'QPSK'    # QPSK or ZadoffChu
-
-opt.feedforward = 'RESIDUAL+' 
-
-if opt.CE not in ['LS', 'LMMSE', 'TRUE']:
-    raise Exception("Channel estimation method not implemented")
-
-if opt.EQ not in ['ZF', 'MMSE']:
-    raise Exception("Equalization method not implemented")
-
-if opt.feedforward not in ['PLAIN', 'RESIDUAL', 'IMPLICIT_EQ', 'RESIDUAL+', 'RESIDUAL++', 'IMPLICIT']:
-    raise Exception("Forward method not implemented")
 
 # Display setting
-opt.checkpoints_dir = './Checkpoints/'+ opt.dataset_mode + '_OFDM'
-opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.CE + '_' + opt.EQ + '_' + opt.feedforward + '_feed_' + str(opt.is_feedback) + '_clip_' + str(opt.is_clip) + '_SNR_' + str(opt.SNR)
+opt.checkpoints_dir = './Checkpoints/'+ opt.dataset_mode + '_VQVAE'
+opt.name = opt.gan_mode + '_K' + str(opt.K)
 
-opt.display_env =  opt.dataset_mode + '_OFDM_' + opt.name
+opt.display_env =  opt.dataset_mode + '_VQVAE_' + opt.name
 
 # Choose the neural network model
-opt.model = 'StoGANOFDM'
+opt.model = 'VQVAE'
 
 
 model = create_model(opt)      # create a model given opt.model and other options
@@ -186,14 +144,18 @@ for epoch in range(opt.epoch_count, opt.n_epochs + opt.n_epochs_decay + 1):    #
             print('saving the latest model (epoch %d, total_iters %d)' % (epoch, total_iters))
             save_suffix = 'iter_%d' % total_iters if opt.save_by_iter else 'latest'
             model.save_networks(save_suffix)
+            torch.save(model.netEM.state_dict(), os.path.join(model.save_dir, 'Embedding.pt'))
         iter_data_time = time.time()
     
     if epoch % opt.save_epoch_freq == 0:              # cache our model every <save_epoch_freq> epochs
         print('saving the model at the end of epoch %d, iters %d' % (epoch, total_iters))
         model.save_networks('latest')
+        torch.save(model.netEM.state_dict(), os.path.join(model.save_dir, 'Embedding.pt'))
         model.save_networks(epoch)
 
     print('End of epoch %d / %d \t Time Taken: %d sec' % (epoch, opt.n_epochs + opt.n_epochs_decay, time.time() - epoch_start_time))
     model.update_learning_rate()  
+    #model.update_SNR(epoch)
+import pdb; pdb.set_trace()  # breakpoint 171c2718 //
 
 
