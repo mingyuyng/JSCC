@@ -34,7 +34,7 @@ opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
 
 ############################ Things recommanded to be changed ##########################################
 # Set up the training procedure
-opt.batchSize = 64           # batch size
+opt.batchSize = 128           # batch size
 opt.n_epochs = 200           # # of epochs without lr decay
 opt.n_epochs_decay = 200     # # of epochs with lr decay
 opt.lr = 5e-4                # Initial learning rate
@@ -51,7 +51,7 @@ opt.is_feedback = False
 # PLAIN: use the concept of channel estimation and equalization to guide the neural networks
 # RESIDUAL1: our usual residual connection
 # RESIDUAL2: a small modification to RESIDUAL1 
-opt.feedforward = 'RESIDUAL2'   
+opt.feedforward = 'RESIDUAL1'   
 ##############################################################################################################
 
 
