@@ -36,30 +36,35 @@ class QAM():
 
         self.index = np.arange(2**(B//2))
         
-        if B == 2:
-            self.map = np.array([-1, 1])
-            self.map2 = np.array([[0], [1]])
-            self.unit = np.sqrt(Ave_Energy/2)
-        elif B == 4:
-            self.map = np.array([-3, -1, 3, 1])
-            self.map2 = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
-            self.unit = np.sqrt(Ave_Energy/10)
-        elif B == 6:
-            self.map = np.array([-7, -5, -1, -3, 7, 5, 1, 3])
-            self.map2 = np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1], [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]])
-            self.unit = np.sqrt(4*Ave_Energy/163)
+        if B > 1:
+            if B == 2:
+                self.map = np.array([-1, 1])
+                self.map2 = np.array([[0], [1]])
+                self.unit = np.sqrt(Ave_Energy/2)
+            elif B == 4:
+                self.map = np.array([-3, -1, 3, 1])
+                self.map2 = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
+                self.unit = np.sqrt(Ave_Energy/10)
+            elif B == 6:
+                self.map = np.array([-7, -5, -1, -3, 7, 5, 1, 3])
+                self.map2 = np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1], [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]])
+                self.unit = np.sqrt(4*Ave_Energy/163)
 
-        self.inv_map_1 = np.zeros((B//2, 2**(B//2-1)))
-        self.inv_map_0 = np.zeros((B//2, 2**(B//2-1)))
+            self.inv_map_1 = np.zeros((B//2, 2**(B//2-1)))
+            self.inv_map_0 = np.zeros((B//2, 2**(B//2-1)))
 
-        tmp = self.index.copy()
-        for i in range(B//2):
-            self.inv_map_1[i] = np.where(tmp>=2**(B//2-1-i))[0] 
-            self.inv_map_0[i] = np.where(tmp<2**(B//2-1-i))[0] 
-            tmp[tmp>=2**(B//2-1-i)] -= 2**(B//2-1-i)
+            tmp = self.index.copy()
+            for i in range(B//2):
+                self.inv_map_1[i] = np.where(tmp>=2**(B//2-1-i))[0] 
+                self.inv_map_0[i] = np.where(tmp<2**(B//2-1-i))[0] 
+                tmp[tmp>=2**(B//2-1-i)] -= 2**(B//2-1-i)
 
-        self.constellation = (np.expand_dims(self.map, axis=1) + np.expand_dims(self.map, axis=0)*1j)*self.unit        
-        self.bound = self.unit*(np.arange(-2**(B//2)+2, 2**(B//2), 2))
+            self.constellation = (np.expand_dims(self.map, axis=1) + np.expand_dims(self.map, axis=0)*1j)*self.unit        
+            self.bound = self.unit*(np.arange(-2**(B//2)+2, 2**(B//2), 2))
+        else:
+            self.constellation = np.array([-1, 1])
+
+         
         self.B = B
 
     def LLR(self, y, sigma):
@@ -156,16 +161,19 @@ class QAM():
             sym = y[m]
             XH = H[m] * self.constellation
             for i in range(self.B):
-                
-                if i < self.B//2:
-                    ind = self.map2[:, i%(self.B//2)]
-                    symbols_0 = XH[ind==0, :]
-                    symbols_1 = XH[ind==1, :]
+                if self.B != 1:
+                    if i < self.B//2:
+                        ind = self.map2[:, i%(self.B//2)]
+                        symbols_0 = XH[ind==0, :]
+                        symbols_1 = XH[ind==1, :]
                     
+                    else:
+                        ind = self.map2[:, i%(self.B//2)]
+                        symbols_0 = XH[:, ind==0]
+                        symbols_1 = XH[:, ind==1]
                 else:
-                    ind = self.map2[:, i%(self.B//2)]
-                    symbols_0 = XH[:, ind==0]
-                    symbols_1 = XH[:, ind==1]
+                    symbols_0 = XH[0]
+                    symbols_1 = XH[1]
 
                 prob_0 = np.sum(np.exp(-((sym.real-symbols_0.real)**2+(sym.imag-symbols_0.imag)**2)/(sigma2[m])))
                 prob_1 = np.sum(np.exp(-((sym.real-symbols_1.real)**2+(sym.imag-symbols_1.imag)**2)/(sigma2[m])))
@@ -212,21 +220,24 @@ class QAM():
         '''
         input: Nx1
         '''
-        tx = x.reshape(x.shape[0]//self.B, self.B)
-        tx_I = tx[:, :self.B//2]
-        tx_Q = tx[:, self.B//2:]
+        if self.B != 1:
+            tx = x.reshape(x.shape[0]//self.B, self.B)
+            tx_I = tx[:, :self.B//2]
+            tx_Q = tx[:, self.B//2:]
 
-        index_I = np.zeros(tx_I.shape[0])
-        index_Q = np.zeros(tx_Q.shape[0])
+            index_I = np.zeros(tx_I.shape[0])
+            index_Q = np.zeros(tx_Q.shape[0])
 
-        for i in range(self.B//2):
-            index_I += 2**(self.B//2-i-1)*tx_I[:,i]
-            index_Q += 2**(self.B//2-i-1)*tx_Q[:,i]
+            for i in range(self.B//2):
+                index_I += 2**(self.B//2-i-1)*tx_I[:,i]
+                index_Q += 2**(self.B//2-i-1)*tx_Q[:,i]
 
-        f = np.vectorize(np.int)
-        tx_sym = self.unit*(self.map[f(index_I)] + self.map[f(index_Q)]*1j)
+            f = np.vectorize(np.int)
+            tx_sym = self.unit*(self.map[f(index_I)] + self.map[f(index_Q)]*1j)
 
-        return tx_sym
+            return tx_sym
+        else:
+            return 2*x-1
 
 
     def Demodulation(self, y):

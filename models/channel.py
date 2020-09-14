@@ -397,13 +397,14 @@ class OFDM_channel(nn.Module):
         return PAPR1, PAPR2
 
 
-    def forward(self, x, SNR, cof=None):
+    def forward(self, x, SNR, cof=None, norm=True):
         # Input size: NxPxSxMx2   The information to be transmitted
         # cof denotes given channel coefficients
         N = x.shape[0]
 
         # Normalize the input power in the frequency domain
-        #x, _ = Normalize(x, pwr=self.pwr)
+        if norm:
+            x, _ = Normalize(x, pwr=self.pwr)
         
         
 

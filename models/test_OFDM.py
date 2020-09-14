@@ -20,9 +20,7 @@ from scipy import special
 # Each packet carriers one LDPC codeword
 
 PI = 3.1415926
-# Set up modulation scheme (2 -> QPSK, 4 -> 16QAM, 8-> 64QAM)
-N_bit = 6
-qam = QAM(Ave_Energy=1, B=N_bit)
+
 
 # Set up the OFDM channel
 ################################################################################
@@ -59,7 +57,7 @@ qam = QAM(Ave_Energy=1, B=N_bit)
 opt = types.SimpleNamespace()
 #opt.N = 10         # Batch size
 opt.P = 1          # Number of packets  (Keep this as 1 for now)
-opt.S = 8          # Number of symbols
+opt.S = 12          # Number of symbols
 opt.M = 64         # Number of subcarriers per symbol
 opt.K = 16         # Length of CP
 opt.L = 8          # Number of paths
@@ -80,7 +78,7 @@ opt.ang = 1.7
 opt.N_pilot = 2           # Number of pilots for channel estimation
 opt.pilot = 'QPSK'   # QPSK or ZadoffChu
 
-opt.gpu_ids = ['0']    # GPU setting
+opt.gpu_ids = ['1']    # GPU setting
 device = torch.device('cuda:{}'.format(opt.gpu_ids[0])) if opt.gpu_ids else torch.device('cpu')
 
 CE = 'TRUE'         # Channel Estimation Method
@@ -96,10 +94,14 @@ if EQ not in ['ZF', 'MMSE']:
 if CHANNEL_CODE not in ['LDPC', 'NONE']:
     raise Exception("Channel coding method not implemented")
 
+# Set up modulation scheme (2 -> QPSK, 4 -> 16QAM, 8-> 64QAM)
+N_bit = 1
+qam = QAM(Ave_Energy=1, B=N_bit)
+
 # Calculate the number of target ldpc codeword length
 N_syms = opt.P*opt.S*opt.M 
 N_bits = N_syms * N_bit
-a, b = 1, 2
+a, b = 2, 3
 rate = a/b
 if rate == 1/2:
     d_v, d_c = 2, 4
@@ -112,11 +114,15 @@ elif rate == 2/3:
 if CHANNEL_CODE == 'LDPC':
     k = math.ceil(N_bits/b)*a
     n = int(k/rate)
+    if n % d_c != 0:
+        n = (n//d_c+1)*d_c
+        k = n//b*a
     ldpc = LDPC(d_v, d_c, k, maxiter=50)
 elif CHANNEL_CODE == 'NONE':
     k = math.ceil(N_bits/b)*a
     n = k
-
+print(k)
+print(n)
 # Generate information bits
 N_test = 100
 tx_bits = np.random.randint(2, size=(N_test, k))
@@ -143,7 +149,7 @@ tx_syms = torch.cat((tx_syms_real, tx_syms_imag), dim=-1)
 opt.N = N_trans
 # Create the OFDM channel
 ofdm_channel = OFDM_channel(opt, device)
-SNR_list = np.arange(0,35,5)
+SNR_list = np.arange(5,10,5)
 
 print('Total number of bits tested: %d' % (N_test*k))
 print('Channel Estimation: ' + CE)
@@ -160,7 +166,7 @@ for idx in range(SNR_list.shape[0]):
     print('Processing SNR %d dB.......' % (SNR))
 
     # Pass the OFDM channel 
-    out_pilot, out_sig, H_true, noise_pwr, _, _ = ofdm_channel(tx_syms, SNR=SNR)
+    out_pilot, out_sig, H_true, noise_pwr, _, _ = ofdm_channel(tx_syms, SNR=SNR, norm=False)
 
     # Channel Estimation
     if CE == 'LS':

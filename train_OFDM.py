@@ -22,8 +22,6 @@ opt.gan_mode = 'none'       # 'wgangp', 'lsgan', 'vanilla', 'none'
 
 opt.n_layers_D = 3
 opt.label_smooth = 1          # Label smoothing factor (for lsgan and vanilla gan only)
- 
-opt.C_channel = 16            # The output channel number of encoder (Important: it controls the rate)
 opt.n_downsample= 2           # Downsample times 
 opt.n_blocks = 2              # Numebr of residual blocks
 opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
@@ -32,6 +30,9 @@ opt.first_kernel = 5          # The filter size of the first convolutional layer
 opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
 
 
+
+
+############################ Things recommanded to be changed ##########################################
 # Set up the training procedure
 opt.batchSize = 64           # batch size
 opt.n_epochs = 200           # # of epochs without lr decay
@@ -40,14 +41,26 @@ opt.lr = 5e-4                # Initial learning rate
 opt.lr_policy = 'linear'     # decay policy.  Availability:  see options/train_options.py
 opt.beta1 = 0.5              # parameter for ADAM
 
+opt.C_channel = 16           # The output channel number of encoder (Important: it controls the rate)
+opt.SNR = 5
+opt.is_clip = False
+opt.CR = 1
+opt.is_feedback = False
+
+# IMPLICIT: connect everything directly to the decoder networks
+# PLAIN: use the concept of channel estimation and equalization to guide the neural networks
+# RESIDUAL1: our usual residual connection
+# RESIDUAL2: a small modification to RESIDUAL1 
+opt.feedforward = 'RESIDUAL2'   
+##############################################################################################################
+
+
 
 # Set up the loss function
 opt.lambda_L2 = 128       # The weight for L2 loss
-opt.is_Feat = False      # Whether to use feature matching loss or not
+opt.is_Feat = False       # Whether to use feature matching loss or not
 opt.lambda_feat = 1
 
-
-##############################################################################################################
  
 
 if opt.gan_mode == 'wgangp':
@@ -88,7 +101,6 @@ else:
 ########################################  OFDM setting  ###########################################
 
 size_after_compress = (opt.size//(opt.n_downsample**2))**2 * (opt.C_channel//2)
-
 opt.N = opt.batchSize                       # Batch size
 opt.P = 1                                   # Number of symbols
 opt.M = 64                                  # Number of subcarriers per symbol
@@ -97,8 +109,8 @@ opt.L = 8                                   # Number of paths
 opt.decay = 4
 opt.S = size_after_compress//opt.M          # Number of packets
 
-opt.is_clip = True
-opt.CR = 1
+if not opt.is_clip:
+    opt.CR = 0
 
 opt.is_cfo = False
 opt.is_trick = True
@@ -106,30 +118,24 @@ opt.is_cfo_random = False
 opt.max_ang = 1.7
 opt.ang = 1.7
 
-opt.is_feedback = False
-
-opt.SNR = 5
 opt.N_pilot = 2   # Number of pilots for chanenl estimation
-
 opt.CE = 'LMMSE'  # Channel Estimation Method
 opt.EQ = 'MMSE'   # Equalization Method
-
 opt.pilot = 'QPSK'    # QPSK or ZadoffChu
 
-opt.feedforward = 'RESIDUAL+' 
 
-if opt.CE not in ['LS', 'LMMSE', 'TRUE']:
+if opt.CE not in ['LS', 'LMMSE', 'TRUE', 'IMPLICIT']:
     raise Exception("Channel estimation method not implemented")
 
-if opt.EQ not in ['ZF', 'MMSE']:
+if opt.EQ not in ['ZF', 'MMSE', 'IMPLICIT']:
     raise Exception("Equalization method not implemented")
 
-if opt.feedforward not in ['PLAIN', 'RESIDUAL', 'IMPLICIT_EQ', 'RESIDUAL+', 'RESIDUAL++', 'IMPLICIT']:
+if opt.feedforward not in ['IMPLICIT', 'PLAIN', 'RESIDUAL1', 'RESIDUAL2']:
     raise Exception("Forward method not implemented")
 
 # Display setting
 opt.checkpoints_dir = './Checkpoints/'+ opt.dataset_mode + '_OFDM'
-opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.CE + '_' + opt.EQ + '_' + opt.feedforward + '_feed_' + str(opt.is_feedback) + '_clip_' + str(opt.is_clip) + '_SNR_' + str(opt.SNR)
+opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.feedforward + '_feed_' + str(opt.is_feedback) + '_clip_' + str(opt.CR) + '_SNR_' + str(opt.SNR)
 
 opt.display_env =  opt.dataset_mode + '_OFDM_' + opt.name
 
