@@ -37,12 +37,12 @@ opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
 opt.batchSize = 128           # batch size
 opt.n_epochs = 200           # # of epochs without lr decay
 opt.n_epochs_decay = 200     # # of epochs with lr decay
-opt.lr = 5e-4                # Initial learning rate
+opt.lr = 1e-3                # Initial learning rate
 opt.lr_policy = 'linear'     # decay policy.  Availability:  see options/train_options.py
 opt.beta1 = 0.5              # parameter for ADAM
 
-opt.C_channel = 16           # The output channel number of encoder (Important: it controls the rate)
-opt.SNR = 5
+opt.C_channel = 12           # The output channel number of encoder (Important: it controls the rate)
+opt.SNR = 20
 opt.is_clip = False
 opt.CR = 1
 opt.is_feedback = False

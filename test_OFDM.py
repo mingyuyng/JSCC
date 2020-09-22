@@ -74,13 +74,11 @@ else:
 
 
 
-
-
 ##################################################################################################
-opt.C_channel = 16           # The output channel number of encoder (Important: it controls the rate)
-opt.SNR = 5
-opt.is_clip = False
-opt.CR = 1
+opt.C_channel = 12           # The output channel number of encoder (Important: it controls the rate)
+opt.SNR = 20
+opt.is_clip = True
+opt.CR = 1.2 
 opt.is_feedback = False
 
 # IMPLICIT: connect everything directly to the decoder networks
@@ -124,7 +122,7 @@ if opt.CE not in ['LS', 'LMMSE', 'TRUE']:
 if opt.EQ not in ['ZF', 'MMSE']:
     raise Exception("Equalization method not implemented")
 
-if opt.feedforward not in ['IMPLICIT', 'PLAIN', 'RESIDUAL1', 'RESIDUAL2']:
+if opt.feedforward not in ['IMPLICIT', 'PLAIN', 'RESIDUAL1', 'RESIDUAL2', 'RESIDUAL3']:
     raise Exception("Forward method not implemented")
 
 

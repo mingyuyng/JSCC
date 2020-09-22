@@ -48,7 +48,7 @@ class QAM():
             elif B == 6:
                 self.map = np.array([-7, -5, -1, -3, 7, 5, 1, 3])
                 self.map2 = np.array([[0, 0, 0], [0, 0, 1], [0, 1, 0], [0, 1, 1], [1, 0, 0], [1, 0, 1], [1, 1, 0], [1, 1, 1]])
-                self.unit = np.sqrt(4*Ave_Energy/163)
+                self.unit = np.sqrt(Ave_Energy/42)
 
             self.inv_map_1 = np.zeros((B//2, 2**(B//2-1)))
             self.inv_map_0 = np.zeros((B//2, 2**(B//2-1)))
@@ -63,8 +63,7 @@ class QAM():
             self.bound = self.unit*(np.arange(-2**(B//2)+2, 2**(B//2), 2))
         else:
             self.constellation = np.array([-1, 1])
-
-         
+        
         self.B = B
 
     def LLR(self, y, sigma):
@@ -149,72 +148,69 @@ class QAM():
         return np.hstack(LLR)
 
 
-    def LLR_OFDM(self, y, H, sigma2, eps=1e-50):
+    def LLR_OFDM(self, y, H, pwr, eps=1e-50):
         # LLR calculation for OFDM system
         # Used when we have perfect channel knowledge
         # y: received symbols
         # H: estimated channel frequency response
 
         M = y.shape[0]
-        LLR = []
+        LLR = np.zeros(M*self.B)
         for m in range(M):
             sym = y[m]
             XH = H[m] * self.constellation
-            for i in range(self.B):
-                if self.B != 1:
+            if self.B == 1:  #If it is BPSK
+                symbols_0 = XH[0]
+                symbols_1 = XH[1]
+                prob_0 = np.exp((-abs(sym-symbols_0)**2)/pwr[m])
+                prob_1 = np.exp((-abs(sym-symbols_1)**2)/pwr[m])
+                LLR[m] = np.log(prob_0+eps) - np.log(prob_1+eps)
+            else: # If not BPSK
+                for i in range(self.B):
+                    ind = self.map2[:, i%(self.B//2)]
                     if i < self.B//2:
-                        ind = self.map2[:, i%(self.B//2)]
                         symbols_0 = XH[ind==0, :]
                         symbols_1 = XH[ind==1, :]
-                    
                     else:
-                        ind = self.map2[:, i%(self.B//2)]
                         symbols_0 = XH[:, ind==0]
-                        symbols_1 = XH[:, ind==1]
-                else:
-                    symbols_0 = XH[0]
-                    symbols_1 = XH[1]
+                        symbols_1 = XH[:, ind==1]               
+                    prob_0 = np.sum(np.exp((-abs(sym-symbols_0)**2)/pwr[m]))
+                    prob_1 = np.sum(np.exp((-abs(sym-symbols_1)**2)/pwr[m]))
+                    LLR[m*self.B+i] = np.log(prob_0+eps) - np.log(prob_1+eps)
+        return LLR
 
-                prob_0 = np.sum(np.exp(-((sym.real-symbols_0.real)**2+(sym.imag-symbols_0.imag)**2)/(sigma2[m])))
-                prob_1 = np.sum(np.exp(-((sym.real-symbols_1.real)**2+(sym.imag-symbols_1.imag)**2)/(sigma2[m])))
-
-                ratio = np.log(prob_0+eps) - np.log(prob_1+eps)
-                
-                LLR.append(ratio)
-
-        return np.hstack(LLR)
-
-    def LLR_OFDM_clip(self, y, H, sigma2, alpha, sigma, eps=1e-50):
+    def LLR_OFDM_clip(self, y, H, pwr, alpha, sigma, eps=1e-50):
         # LLR calculation for OFDM system
         # Used when we have perfect channel knowledge
         # y: received symbols
         # H: estimated channel frequency response
 
         M = y.shape[0]
-        LLR = []
+        LLR = np.zeros(M*self.B)
         for m in range(M):
-            sym = y[m]
-            XH = alpha * H[m] * self.constellation            
-            for i in range(self.B):
-
-                if i < self.B//2:
+            if self.B == 1:  #If it is BPSK
+                sym = y[m]/H[m]
+                XH = alpha * self.constellation
+                symbols_0 = XH[0]
+                symbols_1 = XH[1]                
+                prob_0 = np.exp((-(sym.real-symbols_0.real)**2)/(pwr[m]/(abs(H[m])**2)+2*sigma))
+                prob_1 = np.exp((-(sym.real-symbols_1.real)**2)/(pwr[m]/(abs(H[m])**2)+2*sigma))
+                LLR[m] = np.log(prob_0+eps) - np.log(prob_1+eps)
+            else:  # If not BPSK
+                sym = y[m]
+                XH = alpha * H[m] * self.constellation
+                for i in range(self.B):
                     ind = self.map2[:, i%(self.B//2)]
-                    symbols_0 = XH[ind==0, :]
-                    symbols_1 = XH[ind==1, :]
-                else:
-                    ind = self.map2[:, i%(self.B//2)]
-                    symbols_0 = XH[:, ind==0]
-                    symbols_1 = XH[:, ind==1]
- 
-                prob_0 = np.sum(np.exp(-((sym.real-symbols_0.real)**2+(sym.imag-symbols_0.imag)**2)/(sigma2[m]+abs(H[m])**2*sigma)))
-                prob_1 = np.sum(np.exp(-((sym.real-symbols_1.real)**2+(sym.imag-symbols_1.imag)**2)/(sigma2[m]+abs(H[m])**2*sigma)))
-                
-                ratio = np.log(prob_0+eps) - np.log(prob_1+eps)
-                
-                LLR.append(ratio)
-
-        return np.hstack(LLR)
-
+                    if i < self.B//2:
+                        symbols_0 = XH[ind==0, :]
+                        symbols_1 = XH[ind==1, :]
+                    else:
+                        symbols_0 = XH[:, ind==0]
+                        symbols_1 = XH[:, ind==1]      
+                    prob_0 = np.sum(np.exp((-abs(sym-symbols_0)**2)/(pwr[m]+(abs(H[m])**2)*sigma)))
+                    prob_1 = np.sum(np.exp((-abs(sym-symbols_1)**2)/(pwr[m]+(abs(H[m])**2)*sigma)))
+                    LLR[m*self.B+i] = np.log(prob_0+eps) - np.log(prob_1+eps)
+        return LLR
 
     def Modulation(self, x):
         '''

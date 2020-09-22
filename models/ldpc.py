@@ -33,10 +33,19 @@ class LDPC():
 
 
     def dec(self, LLR):
+        
+        x = decode(self.H, LLR, maxiter=self.maxiter)
 
-        d = get_message(self.G, decode(self.H, LLR, maxiter=self.maxiter))
+        if x.ndim == 1:
+            d = get_message(self.G, x)
+            return d[:self.K]
+        else:
+            d = []
+            for i in range(x.shape[1]):
+                d.append(get_message(self.G, x[:,i]))
 
-        return d[:self.K]
+            d = np.vstack(d)
+            return d[:, :self.K]
 
 
 

@@ -57,17 +57,14 @@ PI = 3.1415926
 opt = types.SimpleNamespace()
 #opt.N = 10         # Batch size
 opt.P = 1          # Number of packets  (Keep this as 1 for now)
-opt.S = 12          # Number of symbols
+opt.S = 6          # Number of symbols
 opt.M = 64         # Number of subcarriers per symbol
 opt.K = 16         # Length of CP
 opt.L = 8          # Number of paths
 opt.decay = 4
 
-opt.is_clip = False    # Whether to clip the OFDM signal or not
+opt.is_clip = True       # Whether to clip the OFDM signal or not
 opt.CR = 1             # Clipping Ratio
-
-alpha = 0.7846
-sigma = 0.0365
 
 opt.is_cfo = False     # Whether to add CFO to the OFDM signal (not used for the experiment yet)
 opt.is_trick = True
@@ -94,14 +91,42 @@ if EQ not in ['ZF', 'MMSE']:
 if CHANNEL_CODE not in ['LDPC', 'NONE']:
     raise Exception("Channel coding method not implemented")
 
+
 # Set up modulation scheme (2 -> QPSK, 4 -> 16QAM, 8-> 64QAM)
 N_bit = 1
 qam = QAM(Ave_Energy=1, B=N_bit)
+CR = opt.CR
+
+if opt.is_clip:
+    if CR == 1 and N_bit == 1:
+        alpha, sigma = 0.7714, 0.0368
+    elif CR == 1.2 and N_bit == 1:
+        alpha, sigma = 0.8589, 0.013
+    elif CR == 1.4 and N_bit == 1:
+        alpha, sigma = 0.9187, 0.0078
+    elif CR == 1 and N_bit == 2:
+        alpha, sigma = 0.7849, 0.0365
+    elif CR == 1.2 and N_bit == 2:
+        alpha, sigma = 0.8673, 0.0258
+    elif CR == 1.4 and N_bit == 2:
+        alpha, sigma = 0.9238, 0.0154
+    elif CR == 1 and N_bit == 4:
+        alpha, sigma = 0.7954, 0.0369
+    elif CR == 1.2 and N_bit == 4:
+        alpha, sigma = 0.8744, 0.0257
+    elif CR == 1.4 and N_bit == 4:
+        alpha, sigma = 0.9279, 0.0153
+    elif CR == 1 and N_bit == 6:
+        alpha, sigma = 0.8068, 0.0374
+    elif CR == 1.2 and N_bit == 6:
+        alpha, sigma = 0.8812, 0.026
+    elif CR == 1.4 and N_bit == 6:
+        alpha, sigma = 0.9311, 0.0153
 
 # Calculate the number of target ldpc codeword length
 N_syms = opt.P*opt.S*opt.M 
 N_bits = N_syms * N_bit
-a, b = 2, 3
+a, b = 1, 2
 rate = a/b
 if rate == 1/2:
     d_v, d_c = 2, 4
@@ -117,12 +142,14 @@ if CHANNEL_CODE == 'LDPC':
     if n % d_c != 0:
         n = (n//d_c+1)*d_c
         k = n//b*a
-    ldpc = LDPC(d_v, d_c, k, maxiter=50)
+    ldpc = LDPC(d_v, d_c, k, maxiter=100)
 elif CHANNEL_CODE == 'NONE':
     k = math.ceil(N_bits/b)*a
     n = k
+
 print(k)
 print(n)
+
 # Generate information bits
 N_test = 100
 tx_bits = np.random.randint(2, size=(N_test, k))
@@ -149,7 +176,9 @@ tx_syms = torch.cat((tx_syms_real, tx_syms_imag), dim=-1)
 opt.N = N_trans
 # Create the OFDM channel
 ofdm_channel = OFDM_channel(opt, device)
-SNR_list = np.arange(5,10,5)
+
+SNR_s = 5
+SNR_list = np.arange(SNR_s,SNR_s+5,5)
 
 print('Total number of bits tested: %d' % (N_test*k))
 print('Channel Estimation: ' + CE)
@@ -198,17 +227,25 @@ for idx in range(SNR_list.shape[0]):
     noise_pwr = noise_pwr.repeat(1,opt.P,opt.S,opt.M).detach().cpu().numpy()
     noise_pwr = noise_pwr.flatten()[:N_test*n//N_bit+1]
     
-    LLR = qam.LLR_OFDM(out_sig, H_est, opt.M*noise_pwr)[:N_test*n].reshape(N_test, n)
-    LLR = np.clip(LLR, -10, 10)
-    
+    if opt.is_clip:
+        LLR = qam.LLR_OFDM_clip(out_sig, H_est, opt.M*noise_pwr, alpha, sigma)[:N_test*n].reshape(N_test, n)
+        LLR = np.clip(LLR, -10, 10)
+    else:
+        LLR = qam.LLR_OFDM(out_sig, H_est, opt.M*noise_pwr)[:N_test*n].reshape(N_test, n)
+        LLR = np.clip(LLR, -10, 10)
+
     # Decoding and demodulation
     rx_bits = np.zeros((N_test, k))
+    #llr = np.transpose(LLR)
     if CHANNEL_CODE == 'LDPC':
-       
+        t_start = time.time()
         for i in range(N_test):
             rx_bits[i,:] = ldpc.dec(LLR[i])
-            if i % 100 == 0:
+            #rx_bits = ldpc.dec(llr[:,:6])
+            if i % 10 == 0:
                 print('DECODED: %d' % (i))
+        #print('time: %.3f' % (time.time()-t_start))
+
     elif CHANNEL_CODE == 'NONE':
         rx_bits[LLR<0] = 1
     

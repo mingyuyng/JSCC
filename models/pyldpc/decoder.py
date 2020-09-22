@@ -23,7 +23,7 @@ def decode(H, Lc, maxiter=1000):
     x: array (n_code,) or (n_code, n_messages) the solutions in the
         codeword space.
 
-    """
+    """    
     m, n = H.shape
 
     bits_hist, bits_values, nodes_hist, nodes_values = utils._bitsandnodes(H)
