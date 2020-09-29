@@ -239,6 +239,7 @@ for idx in range(SNR_list.shape[0]):
     H_true = H_true.squeeze().detach().cpu().numpy()
     H_true = H_true[..., 0] + H_true[..., 1] * 1j
     
+    # Ideal Covariance matrix
     Rhh = np.tile(np.expand_dims(ofdm_channel.channel.Rhh, 0), (N_test, 1, 1))
     Rhh_inv = np.copy(Rhh)
 
@@ -248,6 +249,7 @@ for idx in range(SNR_list.shape[0]):
     A = np.matmul(Rhh, Rhh_inv)
     H_LMMSE = np.matmul(A, np.expand_dims(H_LS, 2)).squeeze()
     
+    # Outer product
     Rhh = np.matmul(np.expand_dims(H_true, 2), np.conjugate(np.expand_dims(H_true, 1)))
     Rhh_inv = np.copy(Rhh)
 
@@ -261,6 +263,8 @@ for idx in range(SNR_list.shape[0]):
     print(np.sum(abs(H_LMMSE_p - H_true)**2) / 100)
     print(np.sum(abs(H_LMMSE - H_true)**2) / 100)
     print(np.sum(abs(H_LMMSE_est - H_true)**2) / 100)
+
+
     import pdb
     pdb.set_trace()  # breakpoint ab5e7554 //
 
