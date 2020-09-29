@@ -77,8 +77,8 @@ else:
 ##################################################################################################
 opt.C_channel = 12           # The output channel number of encoder (Important: it controls the rate)
 opt.SNR = 20
-opt.is_clip = True
-opt.CR = 1.2 
+opt.is_clip = True 
+opt.CR = 1 
 opt.is_feedback = False
 
 # IMPLICIT: connect everything directly to the decoder networks
@@ -128,12 +128,14 @@ if opt.feedforward not in ['IMPLICIT', 'PLAIN', 'RESIDUAL1', 'RESIDUAL2', 'RESID
 
 # Display setting
 opt.checkpoints_dir = './Checkpoints/'+ opt.dataset_mode + '_OFDM'
-opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.feedforward + '_feed_' + str(opt.is_feedback) + '_clip_' + str(opt.CR) + '_SNR_' + str(opt.SNR)
+opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.feedforward + '_feed_' + str(opt.is_feedback) + '_clip_' + str(opt.CR) + '_SNR_' + str(opt.SNR) + '_clip'
 
 
 output_path = './Images/' +  opt.dataset_mode + '_OFDM/' + opt.name
 
-# opt.is_clip = False
+opt.is_clip = True
+opt.CR = 1
+
 # Choose the neural network model
 opt.model = 'StoGANOFDM'
 
@@ -143,7 +145,6 @@ opt.how_many_channel = 5
 opt.N = opt.how_many_channel
 model = create_model(opt)      # create a model given opt.model and other options
 model.setup(opt)               # regular setup: load and print networks; create schedulers
-
 model.eval()
 
 if os.path.exists(output_path) == False:

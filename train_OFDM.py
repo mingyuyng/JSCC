@@ -43,7 +43,7 @@ opt.beta1 = 0.5              # parameter for ADAM
 
 opt.C_channel = 12           # The output channel number of encoder (Important: it controls the rate)
 opt.SNR = 20
-opt.is_clip = False
+opt.is_clip = False 
 opt.CR = 1
 opt.is_feedback = False
 
@@ -51,7 +51,7 @@ opt.is_feedback = False
 # PLAIN: use the concept of channel estimation and equalization to guide the neural networks
 # RESIDUAL1: our usual residual connection
 # RESIDUAL2: a small modification to RESIDUAL1 
-opt.feedforward = 'RESIDUAL1'   
+opt.feedforward = 'EXPLICIT-CE'   
 ##############################################################################################################
 
 
@@ -130,7 +130,7 @@ if opt.CE not in ['LS', 'LMMSE', 'TRUE', 'IMPLICIT']:
 if opt.EQ not in ['ZF', 'MMSE', 'IMPLICIT']:
     raise Exception("Equalization method not implemented")
 
-if opt.feedforward not in ['IMPLICIT', 'PLAIN', 'RESIDUAL1', 'RESIDUAL2']:
+if opt.feedforward not in ['IMPLICIT', 'EXPLICIT-CE', 'EXPLICIT-CE-EQ', 'EXPLICIT-RES']:
     raise Exception("Forward method not implemented")
 
 # Display setting

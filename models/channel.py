@@ -10,7 +10,7 @@ import scipy.io as sio
 import torch.nn.functional as F
 import math
 
-PI = 3.1415926
+PI = math.pi
 
 class BatchConv1DLayer(nn.Module):
     def __init__(self, stride=1,
@@ -77,7 +77,11 @@ class Clipping(nn.Module):
         sigma = torch.sqrt(torch.mean(x**2, (-2,-1), True) * 2)
         ratio = sigma*self.CR/amp
         scale = torch.min(ratio, torch.ones_like(ratio))
-        return x*scale
+
+        with torch.no_grad():
+            bias = x*scale - x
+
+        return x + bias
 
 class Add_CP(nn.Module): 
     '''
@@ -189,6 +193,14 @@ class Channel(nn.Module):
         power = torch.exp(-torch.arange(opt.L).float()/opt.decay).unsqueeze(0).unsqueeze(0).unsqueeze(3)  # 1x1xLx1
         self.power = power/torch.sum(power)
         self.device = device
+
+        self.Rhh = np.zeros((opt.M, opt.M), dtype=complex)
+        
+        for i in range(opt.M):
+            for j in range(opt.M):
+                for m in range(opt.L):
+                    self.Rhh[i][j] += self.power[0,0,m,0].item()*np.exp(-1j*2*PI*m*(i-j)/opt.M)
+
         # Generate the index for batch convolution
         #self.index = toeplitz(np.arange(SMK-1, 2*SMK+opt.L-2), np.arange(SMK-1,-1,-1))
 
@@ -208,7 +220,7 @@ class Channel(nn.Module):
         # Generate Channel Matrix
 
         N, P, SMK, _ = input.shape
-
+        
         if cof is None:
             cof = torch.sqrt(self.power/2) * torch.randn(N, P, self.opt.L, 2)       # NxPxLx2
 
@@ -358,7 +370,7 @@ class OFDM_channel(nn.Module):
         y, H_true = self.channel(tx, cof, False)
         
         # Calculate the power of received signal
-        pwr = torch.mean(y**2, (-2,-1), True) * 2
+        pwr = torch.mean(y**2, (-2,-1), True) * 2        
         noise_pwr = pwr*10**(-SNR/10)
 
         # Generate random noise
@@ -431,21 +443,20 @@ class OFDM_channel(nn.Module):
             x = self.clip(x)
 
         #sio.savemat('vec2.mat', {'x2':torch.sum(x[0,0,:,:]**2, -1).detach().cpu().numpy()})
-
+      
         PAPR3, PAPR4 = self.PAPR(x)
-
+                
         # Pass the Channel:        NxPx(S+1)(M+K)x2  =>  NxPx((S+1)(M+K)+L-1)x2
         y, H_true = self.channel(x, cof)
         
         #sio.savemat('vec2.mat', {'x2':torch.sum(H_true[0,0,:,:]**2, -1).detach().cpu().numpy()})
-        # Calculate the power of received signal
+        # Calculate the power of received signal        
         pwr = torch.mean(y**2, (-2,-1), True) * 2
         noise_pwr = pwr*10**(-SNR/10)
         #noise_pwr = self.pwr*10**(-SNR/10)/self.opt.M
 
         # Generate random noise
         noise = torch.sqrt(noise_pwr/2) * torch.randn_like(y)
-
         y_noisy = y + noise
 
         # Peak Detection: (Perfect)    NxPx((S+S')(M+K)+L-1)x2  =>  NxPx(S+S')x(M+K)x2
@@ -466,7 +477,7 @@ class OFDM_channel(nn.Module):
         info_pilot = torch.fft(info_pilot, 1)
         info_sig = torch.fft(info_sig, 1)
 
-        return info_pilot, info_sig, H_true, noise_pwr, PAPR1, PAPR2
+        return info_pilot, info_sig, H_true, noise_pwr, PAPR1, PAPR3
 
 
 def OFDM_receiver(CE, EQ, x, pilot_rx, pilot_tx, noise_pwr, H_true=None):

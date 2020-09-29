@@ -101,51 +101,37 @@ class QAM():
 
         return np.hstack(LLR)
     
-    def LLR_dist(self, y):
-        # Calculate the LLR based on Euclidean distance
-        # Used when there is clipping effect
+    def LLR_AWGN(self, y, pwr, eps=1e-50):
+        # LLR calculation for OFDM system
+        # Used when we have perfect channel knowledge
         # y: received symbols
+        # H: estimated channel frequency response
+
         M = y.shape[0]
-        LLR = []
+        LLR = np.zeros(M*self.B)
         for m in range(M):
             sym = y[m]
-            
-            f = np.vectorize(np.int)
-            LLR_real = []
-            LLR_imag = []
+            XH = self.constellation
+            if self.B == 1:  #If it is BPSK
+                symbols_0 = XH[0]
+                symbols_1 = XH[1]
+                prob_0 = np.exp((-abs(sym-symbols_0)**2)/pwr)
+                prob_1 = np.exp((-abs(sym-symbols_1)**2)/pwr)
+                LLR[m] = np.log(prob_0+eps) - np.log(prob_1+eps)
+            else: # If not BPSK
+                for i in range(self.B):
+                    ind = self.map2[:, i%(self.B//2)]
+                    if i < self.B//2:
+                        symbols_0 = XH[ind==0, :]
+                        symbols_1 = XH[ind==1, :]
+                    else:
+                        symbols_0 = XH[:, ind==0]
+                        symbols_1 = XH[:, ind==1]               
+                    prob_0 = np.sum(np.exp((-abs(sym-symbols_0)**2)/pwr))
+                    prob_1 = np.sum(np.exp((-abs(sym-symbols_1)**2)/pwr))
+                    LLR[m*self.B+i] = np.log(prob_0+eps) - np.log(prob_1+eps)
+        return LLR
 
-            for i in range(self.B//2):
-
-                pos_0 = self.inv_map_0[i]
-                pos_1 = self.inv_map_1[i]
-                sym_0 = self.map[f(pos_0)]*self.unit
-                sym_1 = self.map[f(pos_1)]*self.unit
-
-                # Euclidean Distance (exponential)
-                dist_0_real = np.min((sym.real - sym_0)**2)
-                dist_1_real = np.min((sym.real - sym_1)**2)
-
-                dist_0_imag = np.min((sym.imag - sym_0)**2)
-                dist_1_imag = np.min((sym.imag - sym_1)**2)
-
-
-                prob_1_real = 1/(1+np.exp(2*dist_1_real-2*dist_0_real))
-                prob_0_real = 1 - prob_1_real
-
-                prob_1_imag = 1/(1+np.exp(2*dist_1_imag-2*dist_0_imag))
-                prob_0_imag= 1 - prob_1_imag
-
-                ratio_real = np.log(prob_0_real) - np.log(prob_1_real)
-                ratio_imag = np.log(prob_0_imag) - np.log(prob_1_imag)
-
-
-                LLR_real.append(ratio_real)
-                LLR_imag.append(ratio_imag)
-
-            LLR.append(np.stack(LLR_real))
-            LLR.append(np.stack(LLR_imag))
-
-        return np.hstack(LLR)
 
 
     def LLR_OFDM(self, y, H, pwr, eps=1e-50):
