@@ -50,3 +50,7 @@ The basic coding framework is based on pix2pix [Github](https://github.com/junya
 
 * Two kinds of pilots (QPSK, ZadoffChu)
 * New LLR calculation for baseline clipping
+
+## 09/28 Structures
+
+![Networks](networks.png)
