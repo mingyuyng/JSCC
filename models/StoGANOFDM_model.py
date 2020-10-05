@@ -123,8 +123,8 @@ class StoGANOFDMModel(BaseModel):
         else:
             cof = None
             latent = self.netE(self.real_A)
-            
-        self.tx = latent.view(self.opt.N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
+
+        self.tx = latent.view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
 
         # Normalization is contained in the channel
         out_pilot, out_sig, self.H_true, noise_pwr, self.PAPR1, self.PAPR2 = self.channel(self.tx, SNR=self.opt.SNR, cof=cof)
