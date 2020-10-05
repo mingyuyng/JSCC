@@ -418,8 +418,6 @@ class OFDM_channel(nn.Module):
         if norm:
             x, _ = Normalize(x, pwr=self.pwr)
         
-        
-
         # IFFT:                    NxPxSxMx2  => NxPxSxMx2
         x = torch.ifft(x, 1)
 
@@ -505,3 +503,91 @@ def OFDM_receiver(CE, EQ, x, pilot_rx, pilot_tx, noise_pwr, H_true=None):
         raise NotImplementedError('The equalization method [%s] is not implemented' % CE)
 
     return H_est, rx
+
+
+class plain(nn.Module):
+    '''
+    Realization of passing multi-path channel
+
+    '''
+    def __init__(self, opt, device):
+        super(plain, self).__init__()
+
+        # Assign the power delay spectrum
+        self.opt = opt
+        
+        # Generate unit power profile
+        power = torch.exp(-torch.arange(opt.L).float()/opt.decay).unsqueeze(0).unsqueeze(0).unsqueeze(3)  # 1x1xLx1
+        self.power = power/torch.sum(power)
+        self.device = device
+
+        self.bconv1d = BatchConv1DLayer(padding=opt.L-1)
+
+
+    def forward(self, input, cof=None):
+        # Input size:   NxPx(Sx(M+K))x2
+        # Output size:  NxPx(L+Sx(M+K)-1)x2
+        # Also return the true channel
+        # Generate Channel Matrix
+
+        N, M, _ = input.shape
+        
+        if cof is None:
+            cof = torch.sqrt(self.power/2) * torch.randn(N, self.opt.L, 2)       # NxLx2
+        
+        signal_real = input[...,0].view(N, 1, 1, -1)       # (N)x(M)x1
+        signal_imag = input[...,1].view(N, 1, 1, -1)       # (N)x(M)x1
+
+        ind = torch.linspace(self.opt.L-1, 0, self.opt.L).long()
+
+        cof_real = cof[...,0][...,ind].view(N, 1, 1, -1).to(self.device) 
+        cof_imag = cof[...,1][...,ind].view(N, 1, 1, -1).to(self.device)
+        
+        output_real = self.bconv1d(signal_real, cof_real) - self.bconv1d(signal_imag, cof_imag)   # (NxP)x(L+SMK-1)x1
+        output_imag = self.bconv1d(signal_real, cof_imag) + self.bconv1d(signal_imag, cof_real)   # (NxP)x(L+SMK-1)x1
+
+        output = torch.cat((output_real.view(N,-1,1), output_imag.view(N,-1,1)), -1)   # (NxP)x(L+SMK-1)x2
+        
+        return output
+
+
+
+class plain_channel(nn.Module):
+    '''
+    SImulating the end-to-end OFDM system with non-linearity
+    '''
+    def __init__(self, opt, device, pwr=1):
+        super(plain_channel, self).__init__()
+        self.opt = opt
+
+        # Setup the channel layer
+        self.channel = plain(opt, device)
+        self.pwr = pwr
+
+    def forward(self, x, SNR):
+        # Input size: NxCx8x8   The information to be transmitted
+        # cof denotes given channel coefficients
+        
+        N, C, _, _ = x.shape
+        
+        # Nx32Cx2
+        tx = x.view(N, -1, 2)
+        M = tx.shape[1]
+
+        # Normalize the input power in the frequency domain
+        tx, _ = Normalize(tx, pwr=self.pwr)
+        
+        y = self.channel(tx, None)
+        
+        # Calculate the power of received signal
+        pwr = torch.mean(y**2, (-2,-1), True) * 2        
+        noise_pwr = pwr*10**(-SNR/10)
+        
+        # Generate random noise
+        noise = torch.sqrt(noise_pwr/2) * torch.randn_like(y)
+        y_noisy = y + noise                                    # Nx(32C+L-1)x2
+
+        rx = y_noisy[:, :M, :].view(N, C, 8, 8)
+        
+        return rx 
+
