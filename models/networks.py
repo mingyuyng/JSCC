@@ -58,7 +58,7 @@ def init_weights(net, init_type='normal', init_gain=0.02):
     work better for some applications. Feel free to try yourself.
     """
     def init_func(m):  # define the initialization function
-        classname = m.__class__.__name__        
+        classname = m.__class__.__name__
         if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
             if init_type == 'normal':
                 init.normal_(m.weight.data, 0.0, init_gain)
@@ -77,7 +77,7 @@ def init_weights(net, init_type='normal', init_gain=0.02):
             init.constant_(m.bias.data, 0.0)
 
     print('initialize network with %s' % init_type)
-    net.apply(init_func)  # apply the initialization function <init_func>    
+    net.apply(init_func)  # apply the initialization function <init_func>
 
 def init_net(net, init_type='normal', init_gain=0.02, gpu_ids=[]):
     """Initialize a network: 1. register CPU/GPU device (with multi-GPU support); 2. initialize the network weights
@@ -90,7 +90,7 @@ def init_net(net, init_type='normal', init_gain=0.02, gpu_ids=[]):
     Return an initialized network.
     """
     if len(gpu_ids) > 0:
-        assert(torch.cuda.is_available())        
+        assert(torch.cuda.is_available())
         net.to(gpu_ids[0])
         net = torch.nn.DataParallel(net, gpu_ids)  # multi-GPUs
     init_weights(net, init_type, init_gain=init_gain)
@@ -137,7 +137,7 @@ class Normalize(nn.Module):
     N = x.shape[0]
     pwr = torch.mean(x**2, (1,2,3), True)
 
-    return np.sqrt(power)*x/torch.sqrt(pwr)  
+    return np.sqrt(power)*x/torch.sqrt(pwr)
 
 
 def define_E(input_nc, ngf, max_ngf, n_downsample, C_channel, n_blocks, norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[], first_kernel=7):
@@ -157,18 +157,18 @@ def define_E(input_nc, ngf, max_ngf, n_downsample, C_channel, n_blocks, norm='in
     """
     net = None
     norm_layer = get_norm_layer(norm_type=norm)
-    net = Encoder(input_nc=input_nc, ngf=ngf, max_ngf=max_ngf, C_channel=C_channel, n_blocks=n_blocks, n_downsampling=n_downsample, norm_layer=norm_layer, padding_type="reflect", first_kernel=first_kernel)    
+    net = Encoder(input_nc=input_nc, ngf=ngf, max_ngf=max_ngf, C_channel=C_channel, n_blocks=n_blocks, n_downsampling=n_downsample, norm_layer=norm_layer, padding_type="reflect", first_kernel=first_kernel)
     return init_net(net, init_type, init_gain, gpu_ids)
 
 def define_OFDM_E(input_nc, ngf, max_ngf, n_downsample, C_channel, n_blocks, norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[], first_kernel=7, first_add_C=0):
     net = None
     norm_layer = get_norm_layer(norm_type=norm)
-    net = Encoder_OFDM(input_nc=input_nc, ngf=ngf, max_ngf=max_ngf, C_channel=C_channel, n_blocks=n_blocks, n_downsampling=n_downsample, norm_layer=norm_layer, padding_type="reflect", first_kernel=first_kernel, first_add_C=first_add_C)    
+    net = Encoder_OFDM(input_nc=input_nc, ngf=ngf, max_ngf=max_ngf, C_channel=C_channel, n_blocks=n_blocks, n_downsampling=n_downsample, norm_layer=norm_layer, padding_type="reflect", first_kernel=first_kernel, first_add_C=first_add_C)
     return init_net(net, init_type, init_gain, gpu_ids)
 
 def define_JSCC_E(C_channel, init_type='kaiming', init_gain=0.02, gpu_ids=[]):
     net = None
-    net = JSCC_encoder(C_channel)    
+    net = JSCC_encoder(C_channel)
     return init_net(net, init_type, init_gain, gpu_ids)
 
 def define_G(output_nc, ngf, max_ngf, n_downsample, C_channel, n_blocks, norm="instance", init_type='kaiming', init_gain=0.02, gpu_ids=[], first_kernel=7, activation='sigmoid'):
@@ -179,7 +179,7 @@ def define_G(output_nc, ngf, max_ngf, n_downsample, C_channel, n_blocks, norm="i
 
 def define_JSCC_G(C_channel, init_type='kaiming', init_gain=0.02, gpu_ids=[]):
     net = None
-    net = JSCC_decoder(C_channel)    
+    net = JSCC_decoder(C_channel)
     return init_net(net, init_type, init_gain, gpu_ids)
 
 def define_D(input_nc, ndf, n_layers_D=3, norm='batch', init_type='normal', init_gain=0.02, gpu_ids=[]):
@@ -322,7 +322,7 @@ class Encoder(nn.Module):
             use_dropout (bool)  -- if use dropout layers
             n_blocks (int)      -- the number of ResNet blocks
             padding_type (str)  -- the name of padding layer in conv layers: reflect | replicate | zero
-        """   
+        """
         assert(n_downsampling>=0)
         assert(n_blocks>=0)
         super(Encoder, self).__init__()
@@ -333,7 +333,7 @@ class Encoder(nn.Module):
             use_bias = norm_layer == nn.InstanceNorm2d
 
         activation = nn.ReLU(True)
-        
+
         model = [nn.ReflectionPad2d((first_kernel-1)//2),
                  nn.Conv2d(input_nc, ngf, kernel_size=first_kernel, padding=0, bias=use_bias),
                  norm_layer(ngf),
@@ -347,13 +347,13 @@ class Encoder(nn.Module):
 
         # add ResNet blocks
         mult = 2 ** n_downsampling
-        for i in range(n_blocks):  
+        for i in range(n_blocks):
             model += [ResnetBlock(min(ngf * mult,max_ngf), padding_type=padding_type, norm_layer=norm_layer, use_dropout=False, use_bias=use_bias)]
 
 
         self.model = nn.Sequential(*model)
         self.projection = nn.Conv2d(min(ngf * mult,max_ngf), C_channel, kernel_size=3, padding=1, stride=1, bias=use_bias)
-        
+        self.normalization = norm_layer(C_channel)
     def forward(self, input):
         z =  self.model(input)
         return  self.projection(z)
@@ -373,7 +373,7 @@ class Encoder_OFDM(nn.Module):
             use_dropout (bool)  -- if use dropout layers
             n_blocks (int)      -- the number of ResNet blocks
             padding_type (str)  -- the name of padding layer in conv layers: reflect | replicate | zero
-        """   
+        """
         assert(n_downsampling>=0)
         assert(n_blocks>=0)
         super(Encoder_OFDM, self).__init__()
@@ -384,7 +384,7 @@ class Encoder_OFDM(nn.Module):
             use_bias = norm_layer == nn.InstanceNorm2d
 
         activation = nn.ReLU(True)
-        
+
         model = [nn.ReflectionPad2d((first_kernel-1)//2),
                  nn.Conv2d(input_nc, ngf, kernel_size=first_kernel, padding=0, bias=use_bias),
                  norm_layer(ngf),
@@ -400,18 +400,18 @@ class Encoder_OFDM(nn.Module):
         model= []
         # add ResNet blocks
         mult = 2 ** n_downsampling
-        for i in range(n_blocks):  
+        for i in range(n_blocks):
             model += [ResnetBlock(min(ngf * mult,max_ngf)+first_add_C, padding_type=padding_type, norm_layer=norm_layer, use_dropout=False, use_bias=use_bias)]
-        
+
         self.model_res = nn.Sequential(*model)
 
         self.projection = nn.Conv2d(min(ngf * mult,max_ngf)+first_add_C, C_channel, kernel_size=3, padding=1, stride=1, bias=use_bias)
-        
+
     def forward(self, input, H=None):
 
         z =  self.model_down(input)
         if H is not None:
-            N,C,HH,WW = z.shape            
+            N,C,HH,WW = z.shape
             z = torch.cat((z,H.contiguous().permute(0,1,2,4,3).view(N, -1, HH,WW)), 1)
         z = self.model_res(z)
         return  self.projection(z)
@@ -471,7 +471,7 @@ class Generator(nn.Module):
 class quantizer_channel(nn.Module):
     def __init__(self, center, Temp, bpe, ber):
         super(quantizer_channel, self).__init__()
-        
+
         self.center = nn.Parameter(center)
         self.register_parameter('center',self.center)
         self.Temp = Temp
@@ -487,11 +487,11 @@ class quantizer_channel(nn.Module):
             upper = np.concatenate((zero, bitmap), axis=1)
             lower = np.concatenate((one, bitmap), axis=1)
             bitmap = np.concatenate((upper, lower), axis=0)
-        
+
         self.map = torch.from_numpy(bitmap).float()
 
     def forward(self, x, Q_type="None"):
-        
+
 
         W_stack = torch.stack([x for _ in range(len(self.center))],dim=-1)
         W_index = torch.argmin(torch.abs(W_stack-self.center),dim=-1)
@@ -527,7 +527,7 @@ class quantizer_channel(nn.Module):
             return x + W_bias,  index
         else:
             return x
-       
+
     def update_Temp(self,new_temp):
         self.Temp = new_temp
     def update_center(self,new_center):
@@ -559,7 +559,7 @@ class bsc_channel(nn.Module):
             with torch.no_grad():
                 bias = index - x
             x = x + bias
-        
+
         out_prob = self.opt.ber + x - 2*self.opt.ber*x
 
         # 2. Sample the bernoulli distribution and generate decoder input
@@ -586,10 +586,10 @@ class bsc_channel(nn.Module):
             dec_in = dec_in + bias
 
         return dec_in
-       
+
     def update_Temp(self,new_temp):
         self.Temp = new_temp
-    
+
 
 class awgn_channel(nn.Module):
     def __init__(self, opt):
@@ -597,8 +597,8 @@ class awgn_channel(nn.Module):
         self.opt=opt
         self.sigma = 10**(-opt.SNR/20)
 
-    def forward(self, x):  
-          
+    def forward(self, x):
+
         noise = self.sigma * torch.randn_like(x)
         dec_in = x+noise
         return dec_in
@@ -710,8 +710,8 @@ class NLayerDiscriminator(nn.Module):
         ]]
 
         sequence += [[nn.Conv2d(ndf * nf_mult, 1, kernel_size=kw, stride=1, padding=padw)]]  # output 1 channel prediction map
-        
-        
+
+
         for n in range(len(sequence)):
             setattr(self, 'model'+str(n), nn.Sequential(*sequence[n]))
 
@@ -727,7 +727,7 @@ class NLayerDiscriminator(nn.Module):
         out = model(res[-1])
 
         return res[1:], out
-        
+
 
 
 
@@ -848,10 +848,10 @@ class MSSIM(nn.Module):
 
         pow1 = mcs ** weights
         pow2 = mssim ** weights
-  
+
         output = torch.prod(pow1[:-1] * pow2[-1])
 
-        if self.is_SSIM: 
+        if self.is_SSIM:
             return 1 - output, mssim[0]
         else:
             return 1-output
@@ -859,24 +859,24 @@ class MSSIM(nn.Module):
 
 class End_classifier(nn.Module):
     def __init__(self, n_channel=8):
-           
+
         assert(n_channel>=0)
         super(End_classifier, self).__init__()
 
         activation = nn.ReLU()
-        
-        sequence = [nn.Conv2d(n_channel, 32, kernel_size=3, padding=1, stride=1), 
+
+        sequence = [nn.Conv2d(n_channel, 32, kernel_size=3, padding=1, stride=1),
                  activation,
-                 nn.Conv2d(32, 32, kernel_size=3, padding=1, stride=1), 
+                 nn.Conv2d(32, 32, kernel_size=3, padding=1, stride=1),
                  activation,
                  nn.Conv2d(32, 32, kernel_size=3, padding=1, stride=1),
                  activation,
                  Flatten(),
-                 nn.Linear(32*8*8, 256), 
+                 nn.Linear(32*8*8, 256),
                  activation,
-                 nn.Linear(256, 128), 
+                 nn.Linear(256, 128),
                  activation,
-                 nn.Linear(128, 64), 
+                 nn.Linear(128, 64),
                  activation,
                  nn.Linear(64, 10)]
 
@@ -1072,21 +1072,21 @@ class DC_Discriminator(torch.nn.Module):
 def define_DC_G(in_channels=100, channels=3, activation='ReLU', norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[]):
     net = None
     norm_layer = get_norm_layer(norm_type=norm)
-    net = DC_Generator(in_channels=in_channels, channels=channels, norm_layer=norm_layer, act=activation)    
+    net = DC_Generator(in_channels=in_channels, channels=channels, norm_layer=norm_layer, act=activation)
     return init_net(net, init_type, init_gain, gpu_ids)
 
 
 def define_DC_D(channels=3, activation='ReLU', norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[]):
     net = None
     norm_layer = get_norm_layer(norm_type=norm)
-    net = DC_Discriminator(channels=channels, norm_layer=norm_layer, act=activation) 
+    net = DC_Discriminator(channels=channels, norm_layer=norm_layer, act=activation)
     return init_net(net, init_type, init_gain, gpu_ids)
 
 
 class RES(nn.Module):
     """Define a Resnet block"""
 
-    def __init__(self, dim, dim_out, padding_type, norm_layer, use_dropout, use_bias):
+    def __init__(self, dim, dim_out, dim_in, padding_type, norm_layer, use_dropout, use_bias):
         """Initialize the Resnet block
 
         A resnet block is a conv block with skip connections
@@ -1095,9 +1095,9 @@ class RES(nn.Module):
         Original Resnet paper: https://arxiv.org/pdf/1512.03385.pdf
         """
         super(RES, self).__init__()
-        self.conv_block = self.build_conv_block(dim, dim_out, padding_type, norm_layer, use_dropout, use_bias)
+        self.conv_block = self.build_conv_block(dim, dim_out, dim_in, padding_type, norm_layer, use_dropout, use_bias)
 
-    def build_conv_block(self, dim, dim_out, padding_type, norm_layer, use_dropout, use_bias):
+    def build_conv_block(self, dim, dim_out, dim_in, padding_type, norm_layer, use_dropout, use_bias):
         """Construct a convolutional block.
 
         Parameters:
@@ -1120,7 +1120,7 @@ class RES(nn.Module):
         else:
             raise NotImplementedError('padding [%s] is not implemented' % padding_type)
 
-        conv_block += [nn.Conv2d(dim, 64, kernel_size=3, padding=p, bias=use_bias), norm_layer(64), nn.ReLU(True)]
+        conv_block += [nn.Conv2d(dim, dim_in, kernel_size=7, padding=3, bias=use_bias), norm_layer(dim_in), nn.ReLU(True)]
         if use_dropout:
             conv_block += [nn.Dropout(0.5)]
 
@@ -1133,7 +1133,7 @@ class RES(nn.Module):
             p = 1
         else:
             raise NotImplementedError('padding [%s] is not implemented' % padding_type)
-        conv_block += [nn.Conv2d(64, dim_out, kernel_size=3, padding=p, bias=use_bias), norm_layer(dim_out)]
+        conv_block += [nn.Conv2d(dim_in, dim_out, kernel_size=7, padding=3, bias=use_bias)]
 
         return nn.Sequential(*conv_block)
 
@@ -1143,14 +1143,14 @@ class RES(nn.Module):
         return out
 
 
-def define_RES(dim, dim_out, norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[]):
+def define_RES(dim, dim_out, dim_in=64, norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[]):
     net = None
     norm_layer = get_norm_layer(norm_type=norm)
     if type(norm_layer) == functools.partial:
         use_bias = norm_layer.func == nn.InstanceNorm2d
     else:
         use_bias = norm_layer == nn.InstanceNorm2d
-    net = RES(dim=dim, dim_out=dim_out, padding_type='zero', norm_layer=norm_layer, use_dropout=False, use_bias=use_bias)    
+    net = RES(dim=dim, dim_out=dim_out, dim_in = dim_in, padding_type='zero', norm_layer=norm_layer, use_dropout=False, use_bias=use_bias)
     return init_net(net, init_type, init_gain, gpu_ids)
 
 
@@ -1170,8 +1170,8 @@ class VQEmbedding(nn.Module):
         return latents
 
     def straight_through(self, z_e_x):
-        z_e_x_ = z_e_x.permute(0, 2, 3, 1).contiguous()        
-        z_q_x_, indices = vq_st(z_e_x_, self.embedding.weight.detach())        
+        z_e_x_ = z_e_x.permute(0, 2, 3, 1).contiguous()
+        z_q_x_, indices = vq_st(z_e_x_, self.embedding.weight.detach())
         z_q_x = z_q_x_.permute(0, 3, 1, 2).contiguous()
 
         z_q_x_bar_flatten = torch.index_select(self.embedding.weight,
@@ -1194,7 +1194,7 @@ class Encoder_VQVAE(nn.Module):
             use_dropout (bool)  -- if use dropout layers
             n_blocks (int)      -- the number of ResNet blocks
             padding_type (str)  -- the name of padding layer in conv layers: reflect | replicate | zero
-        """   
+        """
         assert(n_downsampling>=0)
         assert(n_blocks>=0)
         super(Encoder_VQVAE, self).__init__()
@@ -1205,7 +1205,7 @@ class Encoder_VQVAE(nn.Module):
             use_bias = norm_layer == nn.InstanceNorm2d
 
         activation = nn.ReLU(True)
-        
+
         model = [nn.ReflectionPad2d((first_kernel-1)//2),
                  nn.Conv2d(input_nc, ngf, kernel_size=first_kernel, padding=0, bias=use_bias),
                  norm_layer(ngf),
@@ -1219,12 +1219,12 @@ class Encoder_VQVAE(nn.Module):
 
         # add ResNet blocks
         mult = 2 ** n_downsampling
-        for i in range(n_blocks):  
+        for i in range(n_blocks):
             model += [ResnetBlock(min(ngf * mult,max_ngf), padding_type=padding_type, norm_layer=norm_layer, use_dropout=False, use_bias=use_bias)]
 
 
         self.model = nn.Sequential(*model)
-        
+
     def forward(self, input):
         z =  self.model(input)
         return  z
@@ -1232,7 +1232,7 @@ class Encoder_VQVAE(nn.Module):
 def define_VQVAE_E(input_nc, ngf, max_ngf, n_downsample, n_blocks, norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[], first_kernel=7):
     net = None
     norm_layer = get_norm_layer(norm_type=norm)
-    net = Encoder_VQVAE(input_nc=input_nc, ngf=ngf, max_ngf=max_ngf, n_blocks=n_blocks, n_downsampling=n_downsample, norm_layer=norm_layer, padding_type="reflect", first_kernel=first_kernel)    
+    net = Encoder_VQVAE(input_nc=input_nc, ngf=ngf, max_ngf=max_ngf, n_blocks=n_blocks, n_downsampling=n_downsample, norm_layer=norm_layer, padding_type="reflect", first_kernel=first_kernel)
     return init_net(net, init_type, init_gain, gpu_ids)
 
 
@@ -1287,5 +1287,86 @@ class Generator_VQVAE(nn.Module):
 def define_VQVAE_G(output_nc, ngf, max_ngf, n_downsample, n_blocks, norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[], first_kernel=7, activation='sigmoid'):
     net = None
     norm_layer = get_norm_layer(norm_type=norm)
-    net = Generator_VQVAE(output_nc=output_nc, ngf=ngf, max_ngf=max_ngf, n_blocks=n_blocks, n_downsampling=n_downsample, norm_layer=norm_layer, padding_type="reflect", first_kernel=first_kernel, activation_=activation)    
+    net = Generator_VQVAE(output_nc=output_nc, ngf=ngf, max_ngf=max_ngf, n_blocks=n_blocks, n_downsampling=n_downsample, norm_layer=norm_layer, padding_type="reflect", first_kernel=first_kernel, activation_=activation)
+    return init_net(net, init_type, init_gain, gpu_ids)
+
+
+class RES_gated(nn.Module):
+    """Define a Resnet block"""
+
+    def __init__(self, linear_in, linear_out, dim, dim_out, padding_type, norm_layer, use_dropout, use_bias):
+        """Initialize the Resnet block
+
+        A resnet block is a conv block with skip connections
+        We construct a conv block with build_conv_block function,
+        and implement skip connections in <forward> function.
+        Original Resnet paper: https://arxiv.org/pdf/1512.03385.pdf
+        """
+        super(RES_gated, self).__init__()
+        self.conv_block = self.build_conv_block(dim, dim_out, padding_type, norm_layer, use_dropout, use_bias)
+        self.linear_block = self.build_linear_block(linear_in, linear_out)
+
+
+    def build_conv_block(self, dim, dim_out, padding_type, norm_layer, use_dropout, use_bias):
+        """Construct a convolutional block.
+
+        Parameters:
+            dim (int)           -- the number of channels in the conv layer.
+            padding_type (str)  -- the name of padding layer: reflect | replicate | zero
+            norm_layer          -- normalization layer
+            use_dropout (bool)  -- if use dropout layers.
+            use_bias (bool)     -- if the conv layer uses bias or not
+
+        Returns a conv block (with a conv layer, a normalization layer, and a non-linearity layer (ReLU))
+        """
+        conv_block = []
+        p = 0
+        if padding_type == 'reflect':
+            conv_block += [nn.ReflectionPad2d(1)]
+        elif padding_type == 'replicate':
+            conv_block += [nn.ReplicationPad2d(1)]
+        elif padding_type == 'zero':
+            p = 1
+        else:
+            raise NotImplementedError('padding [%s] is not implemented' % padding_type)
+
+        conv_block += [nn.Conv2d(dim, 64, kernel_size=3, padding=p, bias=use_bias), norm_layer(64), nn.ReLU(True)]
+        if use_dropout:
+            conv_block += [nn.Dropout(0.5)]
+
+        p = 0
+        if padding_type == 'reflect':
+            conv_block += [nn.ReflectionPad2d(1)]
+        elif padding_type == 'replicate':
+            conv_block += [nn.ReplicationPad2d(1)]
+        elif padding_type == 'zero':
+            p = 1
+        else:
+            raise NotImplementedError('padding [%s] is not implemented' % padding_type)
+        conv_block += [nn.Conv2d(64, dim_out, kernel_size=3, padding=p, bias=use_bias), norm_layer(dim_out)]
+
+        return nn.Sequential(*conv_block)
+
+    def build_linear_block(self, linear_in, linear_out):
+        linear_blocks = [nn.Linear(linear_in, linear_out),
+                  nn.Sigmoid()]
+        return nn.Sequential(*linear_blocks)
+
+    def forward(self, x):
+        """Forward function (with skip connections)"""
+        N = x.shape[0]
+
+        out = self.conv_block(x)  # add skip connections
+        #weights = self.linear_block(x.view(N,-1)).view(out.shape)
+        weights = self.linear_block(x.view(N,-1))
+        return out, weights
+
+def define_RES_gated(linear_in, linear_out, dim, dim_out, norm='instance', init_type='kaiming', init_gain=0.02, gpu_ids=[]):
+    net = None
+    norm_layer = get_norm_layer(norm_type=norm)
+    if type(norm_layer) == functools.partial:
+        use_bias = norm_layer.func == nn.InstanceNorm2d
+    else:
+        use_bias = norm_layer == nn.InstanceNorm2d
+    net = RES_gated(linear_in=linear_in, linear_out=linear_out, dim=dim, dim_out=dim_out, padding_type='zero', norm_layer=norm_layer, use_dropout=False, use_bias=use_bias)
     return init_net(net, init_type, init_gain, gpu_ids)

@@ -87,14 +87,14 @@ class VQVAEModel(BaseModel):
     def forward(self):
 
         # Generate latent vector
-        self.latent = self.netE(self.real_A)        
+        self.latent = self.netE(self.real_A)
         z_q_x_st, self.z_q_x = self.netEM.straight_through(self.latent)
         self.fake = self.netG(z_q_x_st)
         
     def encode(self):
         self.latents = self.netEM(self.netE(self.real_A))
 
-    def decode(self):
+    def decode(self):        
         z_q_x = self.netEM.embedding(self.latents).permute(0, 3, 1, 2)  # (B, D, H, W)
         self.fake = self.netG(z_q_x)
 

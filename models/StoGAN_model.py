@@ -98,10 +98,10 @@ class StoGANModel(BaseModel):
             self.latent = torch.sigmoid(latent)
 
         # 2. Pass the channel
-        latent_input = self.channel(self.latent)
+        self.latent_input = self.channel(self.latent)
 
         # 3. Reconstruction
-        self.fake = self.netG(latent)
+        self.fake = self.netG(self.latent_input)
 
     def backward_D(self):
         """Calculate GAN loss for the discriminator"""
@@ -167,16 +167,15 @@ class StoGANModel(BaseModel):
 
 
     def get_encoded(self):
-        return self.netE(self.real_A)
-
-    def get_decoded(self, latent):
+        latent = self.netE(self.real_A)
         if self.opt.channel == 'awgn':   # AWGN channel
             self.latent = self.normalize(latent, 1)
         elif self.opt.channel == 'bsc':   # BSC channel
             self.latent = torch.sigmoid(latent)
 
-        # 2. Pass the channel
-        latent_input = self.channel(self.latent)
 
+    def get_decoded(self):
+        # 2. Pass the channel
+        latent_input = self.channel(self.latent)   
         # 3. Reconstruction
-        return self.netG(latent_input)
+        return latent_input, self.netG(latent_input)

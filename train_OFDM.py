@@ -2,6 +2,7 @@
 # Licensed under the CC BY-NC-SA 4.0 license (https://creativecommons.org/licenses/by-nc-sa/4.0/legalcode).
 import time
 from models import create_model
+from data import create_dataset
 from options.train_options import TrainOptions
 from data.data_loader import CreateDataLoader
 import util.util as util
@@ -20,48 +21,61 @@ opt = TrainOptions().parse()
 # For testing  the neural networks, manually edit/add options below
 opt.gan_mode = 'none'       # 'wgangp', 'lsgan', 'vanilla', 'none'
 
-opt.n_layers_D = 3
-opt.label_smooth = 1          # Label smoothing factor (for lsgan and vanilla gan only)
-opt.n_downsample= 2           # Downsample times 
-opt.n_blocks = 2              # Numebr of residual blocks
-opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
-
 # Set the input dataset
 opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
 
 
+if opt.dataset_mode == 'CIFAR10':
+    opt.n_layers_D = 3
+    opt.label_smooth = 1          # Label smoothing factor (for lsgan and vanilla gan only)
+    opt.n_downsample = 2          # Downsample times
+    opt.n_blocks = 2              # Numebr of residual blocks
+    opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
+    opt.batchSize = 128 
+    opt.n_epochs = 50             # # of epochs without lr decay
+    opt.n_epochs_decay = 50       # # of epochs with lr decay
+    opt.lr_policy = 'linear'      # decay policy.  Availability:  see options/train_options.py
+    opt.beta1 = 0.5               # parameter for ADAM
+    opt.lr = 1e-4                 # Initial learning rate
 
+elif opt.dataset_mode == 'CelebA':
+    opt.n_layers_D = 3
+    opt.label_smooth = 1          # Label smoothing factor (for lsgan and vanilla gan only)
+    opt.n_downsample = 3          # Downsample times
+    opt.n_blocks = 2              # Numebr of residual blocks
+    opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
+    opt.batchSize = 64 
+    opt.n_epochs = 30             # # of epochs without lr decay
+    opt.n_epochs_decay = 30       # # of epochs with lr decay
+    opt.lr_policy = 'linear'      # decay policy.  Availability:  see options/train_options.py
+    opt.beta1 = 0.5               # parameter for ADAM
+    opt.lr = 5e-4
 
 ############################ Things recommanded to be changed ##########################################
-# Set up the training procedure
-opt.batchSize = 128           # batch size
-opt.n_epochs = 200           # # of epochs without lr decay
-opt.n_epochs_decay = 200     # # of epochs with lr decay
-opt.lr = 1e-3                # Initial learning rate
-opt.lr_policy = 'linear'     # decay policy.  Availability:  see options/train_options.py
-opt.beta1 = 0.5              # parameter for ADAM
-
-opt.C_channel = 12           # The output channel number of encoder (Important: it controls the rate)
+# Set up the training procedure           
+opt.C_channel = 12       
 opt.SNR = 20
-opt.is_clip = False 
-opt.CR = 1
+
 opt.is_feedback = False
+opt.feedforward = 'EXPLICIT-RES'
 
-# IMPLICIT: connect everything directly to the decoder networks
-# PLAIN: use the concept of channel estimation and equalization to guide the neural networks
-# RESIDUAL1: our usual residual connection
-# RESIDUAL2: a small modification to RESIDUAL1 
-opt.feedforward = 'EXPLICIT-CE'   
+opt.N_pilot = 2         # Number of pilots for chanenl estimation
+opt.CE = 'MMSE'         # Channel Estimation Method
+opt.EQ = 'MMSE'         # Equalization Method
+opt.pilot = 'ZadoffChu'      # QPSK or ZadoffChu
+
+opt.is_clip = False
+opt.CR = 0 if not opt.is_clip else 1
+opt.is_regu_PAPR = True
+opt.lam_PAPR = 0.5
+opt.is_regu_sigma = False
+opt.lam_sigma = 100
 ##############################################################################################################
-
-
 
 # Set up the loss function
 opt.lambda_L2 = 128       # The weight for L2 loss
 opt.is_Feat = False       # Whether to use feature matching loss or not
 opt.lambda_feat = 1
-
- 
 
 if opt.gan_mode == 'wgangp':
     opt.norm_D = 'instance'   # Use instance normalization when using WGAN.  Available: 'instance', 'batch', 'none'
@@ -72,18 +86,18 @@ opt.activation = 'sigmoid'    # The output activation function at the last layer
 opt.norm_EG = 'batch'
 
 if opt.dataset_mode == 'CIFAR10':
-    opt.dataroot='./data'
+    opt.dataroot = './data'
     opt.size = 32
     transform = transforms.Compose(
         [transforms.RandomHorizontalFlip(p=0.5),
-        transforms.RandomCrop(opt.size, padding=5, pad_if_needed=True, fill=0, padding_mode='reflect'),
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
+         transforms.RandomCrop(opt.size, padding=5, pad_if_needed=True, fill=0, padding_mode='reflect'),
+         transforms.ToTensor(),
+         transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
     trainset = torchvision.datasets.CIFAR10(root='./data', train=True,
                                             download=True, transform=transform)
     dataset = torch.utils.data.DataLoader(trainset, batch_size=opt.batchSize,
-                                             shuffle=True, num_workers=2, drop_last=True)
+                                          shuffle=True, num_workers=2, drop_last=True)
     dataset_size = len(dataset)
     print('#training images = %d' % dataset_size)
 
@@ -98,19 +112,16 @@ elif opt.dataset_mode == 'CelebA':
 else:
     raise Exception('Not implemented yet')
 
-########################################  OFDM setting  ###########################################
 
-size_after_compress = (opt.size//(opt.n_downsample**2))**2 * (opt.C_channel//2)
+########################################  OFDM setting  ###########################################
+size_after_compress = (opt.size // (2**opt.n_downsample))**2 * (opt.C_channel // 2)
 opt.N = opt.batchSize                       # Batch size
 opt.P = 1                                   # Number of symbols
 opt.M = 64                                  # Number of subcarriers per symbol
 opt.K = 16                                  # Length of CP
 opt.L = 8                                   # Number of paths
 opt.decay = 4
-opt.S = size_after_compress//opt.M          # Number of packets
-
-if not opt.is_clip:
-    opt.CR = 0
+opt.S = size_after_compress // opt.M        # Number of packets
 
 opt.is_cfo = False
 opt.is_trick = True
@@ -118,13 +129,7 @@ opt.is_cfo_random = False
 opt.max_ang = 1.7
 opt.ang = 1.7
 
-opt.N_pilot = 2   # Number of pilots for chanenl estimation
-opt.CE = 'LMMSE'  # Channel Estimation Method
-opt.EQ = 'MMSE'   # Equalization Method
-opt.pilot = 'QPSK'    # QPSK or ZadoffChu
-
-
-if opt.CE not in ['LS', 'LMMSE', 'TRUE', 'IMPLICIT']:
+if opt.CE not in ['LS', 'MMSE', 'TRUE', 'IMPLICIT']:
     raise Exception("Channel estimation method not implemented")
 
 if opt.EQ not in ['ZF', 'MMSE', 'IMPLICIT']:
@@ -134,10 +139,10 @@ if opt.feedforward not in ['IMPLICIT', 'EXPLICIT-CE', 'EXPLICIT-CE-EQ', 'EXPLICI
     raise Exception("Forward method not implemented")
 
 # Display setting
-opt.checkpoints_dir = './Checkpoints/'+ opt.dataset_mode + '_OFDM'
+opt.checkpoints_dir = './Checkpoints/' + opt.dataset_mode + '_OFDM'
 opt.name = opt.gan_mode + '_C' + str(opt.C_channel) + '_' + opt.feedforward + '_feed_' + str(opt.is_feedback) + '_clip_' + str(opt.CR) + '_SNR_' + str(opt.SNR)
 
-opt.display_env =  opt.dataset_mode + '_OFDM_' + opt.name
+opt.display_env = opt.dataset_mode + '_OFDM_' + opt.name
 
 # Choose the neural network model
 opt.model = 'StoGANOFDM'
@@ -148,8 +153,7 @@ model.setup(opt)               # regular setup: load and print networks; create 
 visualizer = Visualizer(opt)   # create a visualizer that display/save images and plots
 total_iters = 0                # the total number of training iterations
 
-
-################ Train with the Discriminator
+# Train with the Discriminator
 loss_D_list = []
 loss_G_list = []
 
@@ -159,12 +163,11 @@ for epoch in range(opt.epoch_count, opt.n_epochs + opt.n_epochs_decay + 1):    #
     epoch_iter = 0                  # the number of training iterations in current epoch, reset to 0 every epoch
     visualizer.reset()              # reset the visualizer: make sure it saves the results to HTML at least once every epoch
 
-
     for i, data in enumerate(dataset):  # inner loop within one epoch
         iter_start_time = time.time()  # timer for computation per iteration
         if total_iters % opt.print_freq == 0:
             t_data = iter_start_time - iter_data_time
-        
+
         total_iters += opt.batch_size
         epoch_iter += opt.batch_size
 
@@ -193,13 +196,11 @@ for epoch in range(opt.epoch_count, opt.n_epochs + opt.n_epochs_decay + 1):    #
             save_suffix = 'iter_%d' % total_iters if opt.save_by_iter else 'latest'
             model.save_networks(save_suffix)
         iter_data_time = time.time()
-    
+
     if epoch % opt.save_epoch_freq == 0:              # cache our model every <save_epoch_freq> epochs
         print('saving the model at the end of epoch %d, iters %d' % (epoch, total_iters))
         model.save_networks('latest')
         model.save_networks(epoch)
 
     print('End of epoch %d / %d \t Time Taken: %d sec' % (epoch, opt.n_epochs + opt.n_epochs_decay, time.time() - epoch_start_time))
-    model.update_learning_rate()  
-
-
+    model.update_learning_rate()

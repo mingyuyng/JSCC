@@ -10,13 +10,13 @@ from . import networks
 from . import channel
 import scipy.io as sio
 
-class StoGANOFDMModel(BaseModel):
+class JSCCOFDMModel(BaseModel):
 
     def __init__(self, opt):
         BaseModel.__init__(self, opt)
 
         # specify the training losses you want to print out. The training/test scripts will call <BaseModel.get_current_losses>
-        self.loss_names = ['G_GAN', 'G_L2', 'G_Feat', 'G_PAPR', 'H_old', 'H_new', 'D_real', 'D_fake']
+        self.loss_names = ['G_GAN', 'G_L2', 'G_Feat', 'G_PAPR', 'H_old', 'H_new', 'D_real', 'D_fake', 'sigma']
         # specify the images you want to save/display. The training/test scripts will call <BaseModel.get_current_visuals>
         self.visual_names = ['real_A', 'fake', 'real_B']
 
@@ -34,7 +34,7 @@ class StoGANOFDMModel(BaseModel):
         if self.opt.feedforward in ['EXPLICIT-CE-EQ', 'EXPLICIT-RES', 'EXPLICIT-RES2', 'EXPLICIT-RES3', 'EXPLICIT-RES-gated']:
             C_decode = opt.C_channel
         elif self.opt.feedforward == 'IMPLICIT':
-            C_decode = opt.C_channel + self.opt.N_pilot*self.opt.P*2 + self.opt.P*2 + 1
+            C_decode = opt.C_channel + self.opt.N_pilot*self.opt.P*2 + self.opt.P*2
         elif self.opt.feedforward == 'EXPLICIT-RES4':
             C_decode = 2*opt.C_channel + self.opt.P*2
         elif self.opt.feedforward == 'EXPLICIT-CE':
@@ -62,10 +62,10 @@ class StoGANOFDMModel(BaseModel):
                                           opt.norm_D, opt.init_type, opt.init_gain, self.gpu_ids)
 
         if self.opt.feedforward in ['EXPLICIT-RES']:
-            self.netR1 = networks.define_RES(dim=(self.opt.P+1)*2, dim_out=self.opt.P*2, dim_in = 64, 
+            self.netR1 = networks.define_RES(dim=(self.opt.N_pilot*self.opt.P+1)*2, dim_out=self.opt.P*2,
                                         norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
 
-            self.netR2 = networks.define_RES(dim=(self.opt.S+1)*self.opt.P*2, dim_out=self.opt.S*self.opt.P*2, dim_in = 32,
+            self.netR2 = networks.define_RES(dim=(self.opt.S+1)*self.opt.P*2, dim_out=self.opt.S*self.opt.P*2,
                                         norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
         elif self.opt.feedforward in ['EXPLICIT-RES2']:
             self.netR2 = networks.define_RES(dim=(2*self.opt.S+4)*self.opt.P*2, dim_out=self.opt.S*self.opt.P*2,
@@ -110,12 +110,12 @@ class StoGANOFDMModel(BaseModel):
         self.normalize = networks.Normalize()
         # Initialize the pilots and OFDM channel
         #self.pilot = torch.load('util/pilot.pt')
-        self.channel = channel.OFDM_channel(opt, self.device, pwr=1)
+        self.channel = channel.OFDM_channel_imp(opt, self.device, pwr=1)
 
         #self.cof, _ = self.channel.sample(opt.N)
 
     def name(self):
-        return 'StoGANOFDM_Model'
+        return 'JSCCOFDM_Model'
 
     def set_input(self, image):
         self.real_A = image.clone().to(self.device)
@@ -157,9 +157,7 @@ class StoGANOFDMModel(BaseModel):
             r2 = out_pilot
             r3 = out_sig
             dec_in = torch.cat((r1, r2, r3), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
-            noise_in = noise_pwr.repeat(1,1,H,W)
-            self.fake = self.netG(torch.cat((dec_in, noise_in), 1))
-            
+            self.fake = self.netG(dec_in)
         elif self.opt.feedforward == 'EXPLICIT-CE':
             # Channel estimation
             self.channel_estimation(out_pilot, noise_pwr)
@@ -167,23 +165,36 @@ class StoGANOFDMModel(BaseModel):
             r2 = out_sig
             dec_in = torch.cat((r1, r2), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
             self.fake = self.netG(dec_in)
-
+        elif self.opt.feedforward == 'EXPLICIT-RES4':
+            # Channel estimation
+            self.channel_estimation(out_pilot, noise_pwr)
+            self.equalization(self.H_est, out_sig, noise_pwr)
+            r1 = self.H_est
+            r2 = out_sig
+            r3 = self.rx
+            dec_in = torch.cat((r1, r2, r3), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
+            self.fake = self.netG(dec_in)
         elif self.opt.feedforward == 'EXPLICIT-CE-EQ':
             self.channel_estimation(out_pilot, noise_pwr)
+            self.H_est_new = self.H_est
             self.equalization(self.H_est, out_sig, noise_pwr)
             r1 = self.rx
             dec_in = r1.contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
             self.fake = self.netG(dec_in)
 
-        elif self.opt.feedforward == 'EXPLICIT-RES':
+        elif self.opt.feedforward == 'EXPLICIT-RES' or self.opt.feedforward == 'EXPLICIT-RES-gated':
+            out_pilot = torch.mean(out_pilot, 2, True)
+            self.channel_estimation(out_pilot, noise_pwr/2)
 
-            self.channel_estimation(out_pilot, noise_pwr)
             sub11 = self.channel.pilot.repeat(N,1,1,1,1)
-            sub12 = torch.mean(out_pilot, 2, True)
+            sub12 = out_pilot
             sub1_input = torch.cat((sub11, sub12), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
-            sub1_output = self.netR1(sub1_input).view(N, self.opt.P, 1, 2, self.opt.M).permute(0,1,2,4,3)
-            self.H_est_new = self.H_est + sub1_output
-
+            sub1_output, weights = self.netR1(sub1_input)#.view(N, self.opt.P, 1, 2, self.opt.M).permute(0,1,2,4,3)
+            sub1_output = sub1_output.view(N, self.opt.P, 1, 2, self.opt.M).permute(0,1,2,4,3)
+            weights = weights.view(N, self.opt.P, 1, self.opt.M, 1)
+            
+            self.H_est_new = self.H_est+weights*sub1_output
+            #self.H_est_new = self.H_est
             self.equalization(self.H_est_new, out_sig, noise_pwr)
             sub21 = self.H_est_new
             sub22 = out_sig
@@ -191,7 +202,6 @@ class StoGANOFDMModel(BaseModel):
             sub2_output = self.netR2(sub2_input).view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
             dec_in = (self.rx+sub2_output).permute(0,1,2,4,3).contiguous().view(latent.shape)
             self.fake = self.netG(dec_in)
-
 
         elif self.opt.feedforward == 'EXPLICIT-RES2':
             self.channel_estimation(out_pilot, noise_pwr)
@@ -224,7 +234,7 @@ class StoGANOFDMModel(BaseModel):
             sub23 = self.rx
             sub2_input = torch.cat((sub21, sub22), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
             sub2_output = self.netR2(sub2_input).view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
-            dec_in = (self.rx).permute(0,1,2,4,3).contiguous().view(latent.shape)
+            dec_in = (self.rx+sub2_output).permute(0,1,2,4,3).contiguous().view(latent.shape)
             self.fake = self.netG(dec_in)
 
 
@@ -270,25 +280,18 @@ class StoGANOFDMModel(BaseModel):
 
 
         self.loss_G_L2 = self.criterionL2(self.fake, self.real_B) * self.opt.lambda_L2
-
+        # combine loss and calculate gradients
         self.loss_G_PAPR = torch.mean(self.PAPR)
-        self.loss_G_sigma = torch.mean(self.sigma)
         
-        if self.opt.feedforward == 'EXPLICIT-RES':
-            self.loss_H_new, self.loss_H_old = self.MSE_calculation()
-            self.loss_H_old = 100*torch.mean(self.loss_H_old)
-            self.loss_H_new = 100*torch.mean(self.loss_H_new)
-        else:
-            self.loss_H_old = 0
-            self.loss_H_new = 0
+        self.loss_H_new, self.loss_H_old = self.MSE_calculation()
+        
+        self.loss_H_old = 100*torch.mean(self.loss_H_old)
+        self.loss_H_new = 100*torch.mean(self.loss_H_new)
 
-        self.loss_G = self.loss_G_GAN + self.loss_G_Feat + self.loss_G_L2
-        if self.opt.is_regu_PAPR:
-            self.loss_G += self.opt.lam_PAPR*self.loss_G_PAPR
-
-        if self.opt.is_regu_sigma:
-            self.loss_G += self.opt.lam_sigma*self.loss_G_sigma
-
+        self.loss_sigma = 4000*torch.mean(self.sigma) 
+        #self.loss_H_new = 0
+        #self.loss_H_old = 0
+        self.loss_G = self.loss_G_GAN + self.loss_G_Feat + self.loss_G_L2 + self.loss_sigma
         self.loss_G.backward()
 
     def optimize_parameters(self):
@@ -325,7 +328,7 @@ class StoGANOFDMModel(BaseModel):
     def channel_estimation(self, out_pilot, noise_pwr):
         if self.opt.CE == 'LS':
             self.H_est = channel.LS_channel_est(self.channel.pilot, out_pilot)
-        elif self.opt.CE == 'MMSE':
+        elif self.opt.CE == 'LMMSE':
             self.H_est = channel.LMMSE_channel_est(self.channel.pilot, out_pilot, self.opt.M*noise_pwr)
         elif self.opt.CE == 'TRUE':
             self.H_est = H_true.unsqueeze(2).to(self.device)

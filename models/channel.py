@@ -53,7 +53,7 @@ def Normalize(x, pwr=1):
     '''
     power = torch.mean(x**2, (-2,-1), True)
     alpha = np.sqrt(pwr/2)/torch.sqrt(power)
-    return alpha*x, alpha
+    return alpha*x
 
 class Clipping(nn.Module):
     '''
@@ -65,13 +65,6 @@ class Clipping(nn.Module):
     	
     def forward(self, x):
         # Calculating the scale vector for each element  
-
-        #with torch.no_grad():
-        #    sigma = torch.sqrt(torch.mean(x**2, (-2,-1), True) * 2)
-        #    max_amp = sigma*self.CR
-        #    amp = torch.sqrt(torch.sum(x**2, -1, True))
-        #    scale = max_amp/amp
-        #    scale[scale>1] = 1
 
         amp = torch.sqrt(torch.sum(x**2, -1, True))
         sigma = torch.sqrt(torch.mean(x**2, (-2,-1), True) * 2)
@@ -140,43 +133,6 @@ class Add_CFO(nn.Module):
         return torch.cat((real_out, imag_out), dim=4) 
 
 
-class Add_Pilot(nn.Module):
-    '''
-    Adding additional pilots for phase correction
-    '''
-    def __init__(self, opt):
-        self.opt = opt
-    def forward(self, x):
-        pass
-
-class Add_preamble(nn.Module):
-    '''
-    Adding preamble for synchronization and CFO estimation
-    '''
-    def __int__(self, opt):
-        self.opt = opt
-    def forword(self, x):
-        pass
-
-class Sync(nn.Module):
-    '''
-    Peak estimation and CFO estimation
-    '''
-    def __int__(self, opt):
-        self.opt = opt
-    def forword(self, x):
-        pass
-
-class Correct_CFO(nn.Module):
-    '''
-    Peak estimation and CFO estimation
-    '''
-    def __int__(self, opt):
-        self.opt = opt
-    def forword(self, x):
-        pass
-
-
 class Channel(nn.Module):
     '''
     Realization of passing multi-path channel
@@ -194,17 +150,18 @@ class Channel(nn.Module):
         self.power = power/torch.sum(power)
         self.device = device
 
-        self.Rhh = np.zeros((opt.M, opt.M), dtype=complex)
+        #self.Rhh = np.zeros((opt.M, opt.M), dtype=complex)
         
-        for i in range(opt.M):
-            for j in range(opt.M):
-                for m in range(opt.L):
-                    self.Rhh[i][j] += self.power[0,0,m,0].item()*np.exp(-1j*2*PI*m*(i-j)/opt.M)
+        #for i in range(opt.M):
+        #    for j in range(opt.M):
+        #        for m in range(opt.L):
+        #            self.Rhh[i][j] += self.power[0,0,m,0].item()*np.exp(-1j*2*PI*m*(i-j)/opt.M)
 
         # Generate the index for batch convolution
         #self.index = toeplitz(np.arange(SMK-1, 2*SMK+opt.L-2), np.arange(SMK-1,-1,-1))
 
-        self.bconv1d = BatchConv1DLayer(padding=opt.L-1)        
+        self.bconv1d = BatchConv1DLayer(padding=opt.L-1)  
+
     def sample(self, N, P, M, L):
         # Sample the channel coefficients
         cof = torch.sqrt(self.power/2) * torch.randn(N, P, L, 2)
@@ -347,6 +304,166 @@ class OFDM_channel(nn.Module):
             else:
                 pilot = torch.load('pilot.pt').squeeze()
         
+        self.pilot = Normalize(pilot, pwr=pwr)
+        
+        self.pilot = self.pilot.to(device)
+
+        self.pilot_cp = self.add_cp(torch.ifft(self.pilot,1)).repeat(opt.P, opt.N_pilot,1,1)         #1xMx2  => PxS'x(M+K)x2
+
+        self.pwr = pwr
+
+    def sample(self, N):
+        return self.channel.sample(N, self.opt.P, self.opt.M, self.opt.L)
+
+    def get_channel_estimation(self, CE, SNR, N, cof=None):
+
+        tx = self.pilot_cp.repeat(N,1,1,1,1)
+
+        if self.opt.is_clip:
+            tx = self.clip(tx)
+        
+        tx = tx.view(N, self.opt.P, self.opt.N_pilot*(self.opt.M+self.opt.K), 2)
+
+        y, H_true = self.channel(tx, cof, False)
+        
+        # Calculate the power of received signal
+        pwr = torch.mean(y**2, (-2,-1), True) * 2        
+        noise_pwr = pwr*10**(-SNR/10)
+
+        # Generate random noise
+        noise = torch.sqrt(noise_pwr/2) * torch.randn_like(y)
+        y_noisy = y + noise
+        #noise_pwr = self.pwr*10**(-SNR/10)/self.opt.M
+
+        # Generate random noise
+        #noise = math.sqrt(noise_pwr/2) * torch.randn_like(y)
+        #y_noisy = y + noise
+
+        y_pilot = y_noisy[:,:,:self.opt.N_pilot*(self.opt.M+self.opt.K),:].view(N, self.opt.P, self.opt.N_pilot, self.opt.M+self.opt.K, 2)
+        
+        info_pilot = self.rm_cp(y_pilot)
+        info_pilot = torch.fft(info_pilot, 1)
+        
+        if CE == 'LS':
+            return LS_channel_est(self.pilot, info_pilot)
+        elif CE == 'MMSE':
+            return LMMSE_channel_est(self.pilot, info_pilot, self.opt.M*noise_pwr)
+        else:
+            raise NotImplementedError('The channel estimation method [%s] is not implemented' % CE)
+
+    def PAPR(self, x):
+        power = torch.mean(x**2, (-2,-1))*2
+        max_pwr, _ = torch.max(torch.sum(x**2, -1), -1)
+
+        return 10*torch.log10(max_pwr/power)
+
+
+    def forward(self, x, SNR, cof=None, norm=True):
+        # Input size: NxPxSxMx2   The information to be transmitted
+        # cof denotes given channel coefficients
+        N = x.shape[0]
+
+        # Normalize the input power in the frequency domain
+        if norm:
+            x = Normalize(x, pwr=self.pwr)
+        
+        # IFFT:                    NxPxSxMx2  => NxPxSxMx2
+        x = torch.ifft(x, 1)
+        
+        # Add Cyclic Prefix:       NxPxSxMx2  => NxPxSx(M+K)x2
+        x = self.add_cp(x)
+        
+        # Reshape:
+        x = x.view(N, self.opt.P, self.opt.S*(self.opt.M+self.opt.K), 2)
+        pilot = self.pilot_cp.repeat(N,1,1,1,1).view(N, self.opt.P, self.opt.N_pilot*(self.opt.M+self.opt.K), 2)
+        
+        if self.opt.is_clip:
+            x = self.clip(x)
+            x = Normalize(x, pwr=self.pwr/self.opt.M)
+
+
+        PAPR = self.PAPR(x)
+        
+        x_amp = torch.sqrt(torch.sum(x**2, -1))
+        x_mean = torch.mean(x_amp, (-2, -1))
+        x_mean_2 = torch.mean(x_amp**2, (-2, -1))
+        sigma = x_mean_2 - x_mean**2
+                
+        # Add pilot:               NxPxSx(M+K)x2  => NxPx(S+1)x(M+K)x2
+        x = torch.cat((pilot, x), 2)    
+        
+        #PAPR2 = self.PAPR(x)
+        
+        #sio.savemat('vec1.mat', {'x1':torch.sum(x[0,0,:,:]**2, -1).detach().cpu().numpy()})
+        #sio.savemat('vec2.mat', {'x2':torch.sum(x[0,0,:,:]**2, -1).detach().cpu().numpy()})  
+
+        # Pass the Channel:        NxPx(S+1)(M+K)x2  =>  NxPx((S+1)(M+K)+L-1)x2
+        y, H_true = self.channel(x, cof)
+        
+        # Calculate the power of received signal        
+        pwr = torch.mean(y**2, (-2,-1), True) * 2
+        noise_pwr = pwr*10**(-SNR/10)
+        #noise_pwr = self.pwr*10**(-SNR/10)/self.opt.M
+
+        # Generate random noise
+        noise = torch.sqrt(noise_pwr/2) * torch.randn_like(y)
+        y_noisy = y + noise
+
+        # Peak Detection: (Perfect)    NxPx((S+S')(M+K)+L-1)x2  =>  NxPx(S+S')x(M+K)x2
+        output = y_noisy[:,:,:(self.opt.S+self.opt.N_pilot)*(self.opt.M+self.opt.K),:].view(N, self.opt.P, self.opt.S+self.opt.N_pilot, self.opt.M+self.opt.K, 2)
+
+        # Add CFO:                  NxPx(S+S')x(M+K)x2 => NxPx(S+S')x(M+K)x2
+        if self.opt.is_cfo:
+            output = self.cfo(output)
+ 
+        y_pilot = output[:,:,:self.opt.N_pilot,:,:]         # NxPxS'x(M+K)x2
+        y_sig = output[:,:,self.opt.N_pilot:,:,:]           # NxPxSx(M+K)x2
+
+        # Remove Cyclic Prefix":   
+        info_pilot = self.rm_cp(y_pilot)    # NxPxS'xMx2
+        info_sig = self.rm_cp(y_sig)        # NxPxSxMx2
+
+        # FFT:                     
+        info_pilot = torch.fft(info_pilot, 1)
+        info_sig = torch.fft(info_sig, 1)
+
+        return info_pilot, info_sig, H_true, noise_pwr, PAPR, sigma
+
+
+class OFDM_channel_imp(nn.Module):
+    '''
+    SImulating the end-to-end OFDM system with non-linearity
+    '''
+    def __init__(self, opt, device, pwr = 1):
+        super(OFDM_channel_imp, self).__init__()
+        self.opt = opt
+
+        # Setup the add & remove CP layers
+        self.add_cp = Add_CP(opt)
+        self.rm_cp = RM_CP(opt)
+
+        # Setup the channel layer
+        self.channel = Channel(opt, device)
+        
+        self.clip = Clipping(opt)
+
+        self.cfo = Add_CFO(opt)
+
+       # Generate the pilot signal
+        if opt.pilot == 'QPSK':
+            if not os.path.exists('Pilot_bit.pt'):
+                bits = torch.randint(2, (opt.M,2))
+                torch.save(bits,'Pilot_bit.pt')
+                pilot = (2*bits-1).float()
+            else:
+                bits = torch.load('Pilot_bit.pt')
+                pilot = (2*bits-1).float()
+        elif opt.pilot == 'ZadoffChu':
+            if not os.path.exists('pilot.pt'):
+                pilot = ZadoffChu(order=1, length=opt.M)
+            else:
+                pilot = torch.load('pilot.pt').squeeze()
+        
         self.pilot, _ = Normalize(pilot, pwr=pwr)
         
         self.pilot = self.pilot.to(device)
@@ -389,38 +506,45 @@ class OFDM_channel(nn.Module):
         
         if CE == 'LS':
             return LS_channel_est(self.pilot, info_pilot)
-        elif CE == 'LMMSE':
+        elif CE == 'MMSE':
             return LMMSE_channel_est(self.pilot, info_pilot, self.opt.M*noise_pwr)
         else:
             raise NotImplementedError('The channel estimation method [%s] is not implemented' % CE)
 
     def PAPR(self, x):
-        power1 = torch.mean(x**2, (-2,-1))*2
-        max1, _ = torch.max(torch.sum(x**2, -1), -1)
 
-        PAPR1 = 10*torch.log10(max1/power1)
+        pwr = torch.mean(x**2, (-2,-1))*2
+        pwr_max, _ = torch.max(torch.sum(x**2, -1), -1)
 
-        x_tmp = x[..., self.opt.N_pilot*(self.opt.M+self.opt.K):, :]
-
-        power2 = torch.mean(x_tmp**2, (-2,-1))*2
-        max2, _= torch.max(torch.sum(x_tmp**2, -1), -1)
-        PAPR2 = 10*torch.log10(max2/power2)
-
-        return PAPR1, PAPR2
+        return 10*torch.log10(pwr_max/pwr)
 
 
     def forward(self, x, SNR, cof=None, norm=True):
         # Input size: NxPxSxMx2   The information to be transmitted
         # cof denotes given channel coefficients
         N = x.shape[0]
-
+        
         # Normalize the input power in the frequency domain
         if norm:
             x, _ = Normalize(x, pwr=self.pwr)
-        
+
         # IFFT:                    NxPxSxMx2  => NxPxSxMx2
         x = torch.ifft(x, 1)
 
+        #x_amp = torch.sqrt(torch.sum(x**2, -1, True))  #NxPxSxMx1
+        #scale = torch.tanh(x_amp)/x_amp                #NxPxSxMx1
+        #x = x*scale        
+        
+        # Clipping (Optional):     NxPx(S+1)(M+K)x2  => NxPx(S+1)(M+K)x2
+        #if self.opt.is_clip:
+        #    x = self.clip(x)
+
+        #x, _ = Normalize(x, pwr=self.pwr/self.opt.M)
+        x_amp = torch.sqrt(torch.sum(x**2, -1))
+        x_mean = torch.mean(x_amp, (-2, -1))
+        x_mean_2 = torch.mean(x_amp**2, (-2, -1))
+        sigma = x_mean_2 - x_mean**2
+        
         # Add Cyclic Prefix:       NxPxSxMx2  => NxPxSx(M+K)x2
         x = self.add_cp(x)
 
@@ -432,26 +556,14 @@ class OFDM_channel(nn.Module):
         # Reshape:                 NxPx(S+1)x(M+K)x2  => NxPx(S+1)(M+K)x2
         x = x.view(N, self.opt.P, (self.opt.S+self.opt.N_pilot)*(self.opt.M+self.opt.K), 2)
         
-        PAPR1, PAPR2 = self.PAPR(x)
+        PAPR = self.PAPR(x)
         
-        #sio.savemat('vec1.mat', {'x1':torch.sum(x[0,0,:,:]**2, -1).detach().cpu().numpy()})
-
-        # Clipping (Optional):     NxPx(S+1)(M+K)x2  => NxPx(S+1)(M+K)x2
-        if self.opt.is_clip:
-            x = self.clip(x)
-
-        #sio.savemat('vec2.mat', {'x2':torch.sum(x[0,0,:,:]**2, -1).detach().cpu().numpy()})
-      
-        PAPR3, PAPR4 = self.PAPR(x)
-                
         # Pass the Channel:        NxPx(S+1)(M+K)x2  =>  NxPx((S+1)(M+K)+L-1)x2
         y, H_true = self.channel(x, cof)
         
-        #sio.savemat('vec2.mat', {'x2':torch.sum(H_true[0,0,:,:]**2, -1).detach().cpu().numpy()})
         # Calculate the power of received signal        
         pwr = torch.mean(y**2, (-2,-1), True) * 2
         noise_pwr = pwr*10**(-SNR/10)
-        #noise_pwr = self.pwr*10**(-SNR/10)/self.opt.M
 
         # Generate random noise
         noise = torch.sqrt(noise_pwr/2) * torch.randn_like(y)
@@ -475,7 +587,7 @@ class OFDM_channel(nn.Module):
         info_pilot = torch.fft(info_pilot, 1)
         info_sig = torch.fft(info_sig, 1)
 
-        return info_pilot, info_sig, H_true, noise_pwr, PAPR1, PAPR3
+        return info_pilot, info_sig, H_true, noise_pwr, PAPR, sigma
 
 
 def OFDM_receiver(CE, EQ, x, pilot_rx, pilot_tx, noise_pwr, H_true=None):
