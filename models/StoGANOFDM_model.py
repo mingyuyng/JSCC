@@ -26,22 +26,25 @@ class StoGANOFDMModel(BaseModel):
         else:  # during test time, only load G
             self.model_names = ['E', 'G']
 
-        if self.opt.feedforward in ['EXPLICIT-RES', 'EXPLICIT-RES3', 'EXPLICIT-RES-gated']:
+        if self.opt.feedforward in ['EXPLICIT-RES']:
             self.model_names += ['R1', 'R2']
-        elif self.opt.feedforward in ['EXPLICIT-RES2']:
+        elif self.opt.feedforward in ['EXPLICIT-RES-CE']:
+            self.model_names += ['R1']
+        elif self.opt.feedforward in ['EXPLICIT-RES-EQ']:
             self.model_names += ['R2']
 
-        if self.opt.feedforward in ['EXPLICIT-CE-EQ', 'EXPLICIT-RES', 'EXPLICIT-RES2', 'EXPLICIT-RES3', 'EXPLICIT-RES-gated']:
+        if self.opt.feedforward in ['EXPLICIT-CE-EQ', 'EXPLICIT-RES', 'EXPLICIT-RES-CE', 'EXPLICIT-RES-EQ']:
             C_decode = opt.C_channel
         elif self.opt.feedforward == 'IMPLICIT':
             C_decode = opt.C_channel + self.opt.N_pilot*self.opt.P*2 + self.opt.P*2 + 1
-        elif self.opt.feedforward == 'EXPLICIT-RES4':
-            C_decode = 2*opt.C_channel + self.opt.P*2
-        elif self.opt.feedforward == 'EXPLICIT-CE':
-            C_decode = opt.C_channel + self.opt.P*2
+        elif self.opt.feedforward == 'IMPLICIT_nopilot':
+            C_decode = opt.C_channel + 1
 
         if self.opt.is_feedback:
             add_C = self.opt.P*2
+            self.model_names += ['R3']
+            self.netR3 = networks.define_RES(dim=(self.opt.P+1)*2, dim_out=self.opt.P*2, dim_in = 64,
+                                        norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
         else:
             add_C = 0
 
@@ -61,26 +64,19 @@ class StoGANOFDMModel(BaseModel):
             self.netD = networks.define_D(opt.output_nc, opt.ndf, opt.n_layers_D,
                                           opt.norm_D, opt.init_type, opt.init_gain, self.gpu_ids)
 
-        if self.opt.feedforward in ['EXPLICIT-RES']:
-            self.netR1 = networks.define_RES(dim=(self.opt.P+1)*2, dim_out=self.opt.P*2, dim_in = 64, 
-                                        norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
+        self.size_out = (opt.size // (2**opt.n_downsample))**2
 
-            self.netR2 = networks.define_RES(dim=(self.opt.S+1)*self.opt.P*2, dim_out=self.opt.S*self.opt.P*2, dim_in = 32,
-                                        norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
-        elif self.opt.feedforward in ['EXPLICIT-RES2']:
-            self.netR2 = networks.define_RES(dim=(2*self.opt.S+4)*self.opt.P*2, dim_out=self.opt.S*self.opt.P*2,
-                                        norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
-        elif self.opt.feedforward in ['EXPLICIT-RES3']:
-            self.netR1 = networks.define_RES(dim=(self.opt.P+1)*2, dim_out=self.opt.P*2,
-                                        norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
 
-            self.netR2 = networks.define_RES(dim=(self.opt.S+1)*self.opt.P*2, dim_out=self.opt.S*self.opt.P*2,
+        if self.opt.feedforward in ['EXPLICIT-RES-CE']:
+            self.netR1 = networks.define_RES_new(dim=6, dim_out=2, dim_in = 32,
                                         norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
-        elif self.opt.feedforward in ['EXPLICIT-RES-gated']:
-            self.netR1 = networks.define_RES_gated(linear_in = (self.opt.P+1)*opt.M*2, linear_out = self.opt.P*opt.M, dim=(self.opt.P+1)*2, dim_out=self.opt.P*2,
+        elif self.opt.feedforward in ['EXPLICIT-RES-EQ']:
+            self.netR2 = networks.define_RES_new(dim=6, dim_out=2, dim_in = 32,
                                         norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
-
-            self.netR2 = networks.define_RES(dim=(self.opt.S+1)*self.opt.P*2, dim_out=self.opt.S*self.opt.P*2,
+        elif self.opt.feedforward in ['EXPLICIT-RES']:
+            self.netR1 = networks.define_RES_new(dim=6, dim_out=2, dim_in = 32,
+                                        norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
+            self.netR2 = networks.define_RES_new(dim=6, dim_out=2, dim_in = 32,
                                         norm=opt.norm_EG, init_type=opt.init_type, init_gain=opt.init_gain, gpu_ids=self.gpu_ids)
 
         print('---------- Networks initialized -------------')
@@ -93,10 +89,16 @@ class StoGANOFDMModel(BaseModel):
 
             params = list(self.netE.parameters()) + list(self.netG.parameters())
 
-            if self.opt.feedforward in ['EXPLICIT-RES', 'EXPLICIT-RES3', 'EXPLICIT-RES-gated']:
-                params+=list(self.netR1.parameters()) + list(self.netR2.parameters())
-            elif self.opt.feedforward in ['EXPLICIT-RES2']:
+            if self.opt.feedforward in ['EXPLICIT-RES-CE']:
+                params+= list(self.netR1.parameters())
+            elif self.opt.feedforward in ['EXPLICIT-RES-EQ']:
                 params+= list(self.netR2.parameters())
+            elif self.opt.feedforward in ['EXPLICIT-RES']:
+                params+= list(self.netR1.parameters())
+                params+= list(self.netR2.parameters())
+
+            if self.opt.is_feedback:
+                params+= list(self.netR3.parameters())
 
             self.optimizer_G = torch.optim.Adam(params, lr=opt.lr, betas=(opt.beta1, 0.999))
             self.optimizers.append(self.optimizer_G)
@@ -113,6 +115,11 @@ class StoGANOFDMModel(BaseModel):
         self.channel = channel.OFDM_channel(opt, self.device, pwr=1)
 
         #self.cof, _ = self.channel.sample(opt.N)
+        #if self.opt.feedforward in ['EXPLICIT-RES', 'EXPLICIT-RES-CE', 'EXPLICIT-RES-EQ', 'EXPLICIT-RES-new'] and opt.isTrain:
+        #    self.temp = 0
+        #else:
+        #    self.temp = 1
+
 
     def name(self):
         return 'StoGANOFDM_Model'
@@ -137,20 +144,26 @@ class StoGANOFDMModel(BaseModel):
         # Generate latent vector
         if self.opt.is_feedback:
             cof, _ = self.channel.sample(N)
-            H = self.channel.get_channel_estimation(self.opt.CE, self.opt.SNR, N, cof)
-            if torch.cuda.is_available():
-                H = H.to(self.device)
-            latent = self.netE(self.real_A, H)
+            with torch.no_grad():
+                info_pilot, noise_p = self.channel.get_channel_realization(self.opt.SNR, N, cof)
+
+            info_pilot = info_pilot.to(self.device)
+            noise_p = noise_p.to(self.device)
+            H = self.channel_estimation(info_pilot, noise_p)
+            input = torch.cat((self.channel.pilot.repeat(N,1,1,1,1), info_pilot), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, 8, 8)
+            output = self.netR3(input).view(N, self.opt.P, 1, 2, self.opt.M).permute(0,1,2,4,3)
+            latent = self.netE(self.real_A, H+output)
         else:
             cof = None
             latent = self.netE(self.real_A)
 
 
         self.tx = latent.view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
-
         # Normalization is contained in the channel
-        out_pilot, out_sig, self.H_true, noise_pwr, self.PAPR, self.sigma = self.channel(self.tx, SNR=self.opt.SNR, cof=cof)
+        out_pilot, out_sig, self.H_true, noise_pwr, self.PAPR = self.channel(self.tx, SNR=self.opt.SNR, cof=cof)
         N, C, H, W = latent.shape
+
+        self.out_sig = out_sig
 
         if self.opt.feedforward == 'IMPLICIT':
             r1 = self.channel.pilot.repeat(N,1,1,1,1)
@@ -159,72 +172,70 @@ class StoGANOFDMModel(BaseModel):
             dec_in = torch.cat((r1, r2, r3), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
             noise_in = noise_pwr.repeat(1,1,H,W)
             self.fake = self.netG(torch.cat((dec_in, noise_in), 1))
-            
-        elif self.opt.feedforward == 'EXPLICIT-CE':
-            # Channel estimation
-            self.channel_estimation(out_pilot, noise_pwr)
-            r1 = self.H_est
-            r2 = out_sig
-            dec_in = torch.cat((r1, r2), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
-            self.fake = self.netG(dec_in)
+
+        elif self.opt.feedforward == 'IMPLICIT_nopilot':
+            dec_in = out_sig.permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
+            noise_in = noise_pwr.repeat(1,1,H,W)
+            self.fake = self.netG(torch.cat((dec_in, noise_in), 1))
+
 
         elif self.opt.feedforward == 'EXPLICIT-CE-EQ':
-            self.channel_estimation(out_pilot, noise_pwr)
-            self.equalization(self.H_est, out_sig, noise_pwr)
+            self.H_est = self.channel_estimation(out_pilot, noise_pwr)
+            self.rx = self.equalization(self.H_est, out_sig, noise_pwr)
             r1 = self.rx
             dec_in = r1.contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
             self.fake = self.netG(dec_in)
 
-        elif self.opt.feedforward == 'EXPLICIT-RES':
 
-            self.channel_estimation(out_pilot, noise_pwr)
+        elif self.opt.feedforward == 'EXPLICIT-RES-CE':
+            self.H_est = self.channel_estimation(out_pilot, noise_pwr)
             sub11 = self.channel.pilot.repeat(N,1,1,1,1)
             sub12 = torch.mean(out_pilot, 2, True)
-            sub1_input = torch.cat((sub11, sub12), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
+            sub13 = self.H_est
+            sub1_input = torch.cat((sub11, sub12, sub13), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, 8, 8)
             sub1_output = self.netR1(sub1_input).view(N, self.opt.P, 1, 2, self.opt.M).permute(0,1,2,4,3)
-            self.H_est_new = self.H_est + sub1_output
 
-            self.equalization(self.H_est_new, out_sig, noise_pwr)
+            self.H_est_new = self.H_est + sub1_output
             sub21 = self.H_est_new
             sub22 = out_sig
-            sub2_input = torch.cat((sub21, sub22), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
-            sub2_output = self.netR2(sub2_input).view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
+            self.rx = self.equalization(sub21, out_sig, noise_pwr)
+            sub23 = self.rx
+
+            dec_in = (self.rx).permute(0,1,2,4,3).contiguous().view(latent.shape)
+            self.fake = self.netG(dec_in)
+
+        elif self.opt.feedforward == 'EXPLICIT-RES-EQ':
+
+            self.H_est = self.channel_estimation(out_pilot, noise_pwr)
+            self.H_est_new = self.H_est
+
+            sub21 = self.H_est_new
+            sub22 = out_sig
+            self.rx = self.equalization(sub21, out_sig, noise_pwr)
+            sub23 = self.rx
+
+            sub2_input = torch.cat((sub21.repeat(1,1,self.opt.S,1,1), sub22, sub23), 3).reshape(-1, 1, 3, self.opt.M, 2).contiguous().permute(0,1,2,4,3).contiguous().view(-1, 6, 8, 8)
+            sub2_output = self.netR2(sub2_input).view(-1, 1, 1, 2, self.opt.M).permute(0,1,2,4,3).view(self.rx.shape)
             dec_in = (self.rx+sub2_output).permute(0,1,2,4,3).contiguous().view(latent.shape)
             self.fake = self.netG(dec_in)
 
-
-        elif self.opt.feedforward == 'EXPLICIT-RES2':
-            self.channel_estimation(out_pilot, noise_pwr)
-            self.equalization(self.H_est, out_sig, noise_pwr)
-            sub1 = self.channel.pilot.repeat(N,1,1,1,1)
-            sub2 = out_pilot
-            sub3 = self.H_est
-            sub4 = out_sig
-            sub5 = self.rx
-            sub_input = torch.cat((sub1, sub2, sub3, sub4, sub5), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
-            sub_output = self.netR2(sub_input).view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
-            dec_in = (self.rx+sub_output).permute(0,1,2,4,3).contiguous().view(latent.shape)
-            self.fake = self.netG(dec_in)
-
-        elif self.opt.feedforward == 'EXPLICIT-RES3':
-            out_pilot = torch.mean(out_pilot, 2, True)
-            self.channel_estimation(out_pilot, noise_pwr/2)
-
+        elif self.opt.feedforward == 'EXPLICIT-RES':
+            self.H_est = self.channel_estimation(out_pilot, noise_pwr)
             sub11 = self.channel.pilot.repeat(N,1,1,1,1)
-            sub12 = out_pilot
+            sub12 = torch.mean(out_pilot, 2, True)
             sub13 = self.H_est
-            sub1_input = torch.cat((sub11, sub12), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
+            sub1_input = torch.cat((sub11, sub12, sub13), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, 8, 8)
             sub1_output = self.netR1(sub1_input).view(N, self.opt.P, 1, 2, self.opt.M).permute(0,1,2,4,3)
 
-            self.H_est_new = self.H_est+sub1_output
-            #self.H_est_new = self.H_est
-            self.equalization(self.H_est_new, out_sig, noise_pwr)
+            self.H_est_new = self.H_est + sub1_output
             sub21 = self.H_est_new
             sub22 = out_sig
+            self.rx = self.equalization(sub21, out_sig, noise_pwr)
             sub23 = self.rx
-            sub2_input = torch.cat((sub21, sub22), 2).contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
-            sub2_output = self.netR2(sub2_input).view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
-            dec_in = (self.rx).permute(0,1,2,4,3).contiguous().view(latent.shape)
+
+            sub2_input = torch.cat((sub21.repeat(1,1,self.opt.S,1,1), sub22, sub23), 3).reshape(-1, 1, 3, self.opt.M, 2).contiguous().permute(0,1,2,4,3).contiguous().view(-1, 6, 8, 8)
+            sub2_output = self.netR2(sub2_input).view(-1, 1, 1, 2, self.opt.M).permute(0,1,2,4,3).view(self.rx.shape)
+            dec_in = (self.rx+sub2_output).permute(0,1,2,4,3).contiguous().view(latent.shape)
             self.fake = self.netG(dec_in)
 
 
@@ -272,9 +283,9 @@ class StoGANOFDMModel(BaseModel):
         self.loss_G_L2 = self.criterionL2(self.fake, self.real_B) * self.opt.lambda_L2
 
         self.loss_G_PAPR = torch.mean(self.PAPR)
-        self.loss_G_sigma = torch.mean(self.sigma)
-        
-        if self.opt.feedforward == 'EXPLICIT-RES':
+        #self.loss_G_sigma = torch.mean(self.sigma)
+
+        if self.opt.feedforward in ['EXPLICIT-RES', 'EXPLICIT-RES-new', 'EXPLICIT-RES-CE', 'EXPLICIT-RES-new-new', 'EXPLICIT-RES-FC']:
             self.loss_H_new, self.loss_H_old = self.MSE_calculation()
             self.loss_H_old = 100*torch.mean(self.loss_H_old)
             self.loss_H_new = 100*torch.mean(self.loss_H_new)
@@ -286,8 +297,8 @@ class StoGANOFDMModel(BaseModel):
         if self.opt.is_regu_PAPR:
             self.loss_G += self.opt.lam_PAPR*self.loss_G_PAPR
 
-        if self.opt.is_regu_sigma:
-            self.loss_G += self.opt.lam_sigma*self.loss_G_sigma
+        #if self.opt.is_regu_sigma:
+        #    self.loss_G += self.opt.lam_sigma*self.loss_G_sigma
 
         self.loss_G.backward()
 
@@ -324,25 +335,42 @@ class StoGANOFDMModel(BaseModel):
 
     def channel_estimation(self, out_pilot, noise_pwr):
         if self.opt.CE == 'LS':
-            self.H_est = channel.LS_channel_est(self.channel.pilot, out_pilot)
+            return channel.LS_channel_est(self.channel.pilot, out_pilot)
         elif self.opt.CE == 'MMSE':
-            self.H_est = channel.LMMSE_channel_est(self.channel.pilot, out_pilot, self.opt.M*noise_pwr)
+            return channel.LMMSE_channel_est(self.channel.pilot, out_pilot, self.opt.M*noise_pwr)
         elif self.opt.CE == 'TRUE':
-            self.H_est = H_true.unsqueeze(2).to(self.device)
+            return H_true.unsqueeze(2).to(self.device)
         else:
             raise NotImplementedError('The channel estimation method [%s] is not implemented' % CE)
 
     def equalization(self, H_est, out_sig, noise_pwr):
         # Equalization
         if self.opt.EQ == 'ZF':
-            self.rx = channel.ZF_equalization(H_est, out_sig)
+            return channel.ZF_equalization(H_est, out_sig)
         elif self.opt.EQ == 'MMSE':
-            self.rx = channel.MMSE_equalization(H_est, out_sig, self.opt.M*noise_pwr)
+            return channel.MMSE_equalization(H_est, out_sig, self.opt.M*noise_pwr)
         elif self.opt.EQ == 'None':
-            self.rx = None
+            return None
         else:
             raise NotImplementedError('The equalization method [%s] is not implemented' % CE)
 
-    def get_decoded(self, latent):
-        pass
+    def get_encoded(self, image):
+
+        N = image.shape[0]
+        latent = self.netE(image.to(self.device))
+
+        tx = latent.view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
+
+        return channel.Normalize(tx, 1)
+
+    #def update_temp(self, itera):
+
+    #    if self.opt.feedforward in ['EXPLICIT-RES', 'EXPLICIT-RES-CE', 'EXPLICIT-RES-EQ', 'EXPLICIT-RES-new', 'EXPLICIT-RES-new-new']:
+     #       if itera < self.opt.iter_temp:
+    #            self.temp = (itera+1)/self.opt.iter_temp
+     #       else:
+     #           self.temp = 1
+        #import pdb; pdb.set_trace()  # breakpoint 6a499761 //
+
+        #print('current temperature: %f' % (self.temp))
 
