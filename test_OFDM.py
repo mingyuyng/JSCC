@@ -4,6 +4,7 @@ import time
 from models import create_model
 from options.test_options import TestOptions
 from data.data_loader import CreateDataLoader
+from data import create_dataset
 import util.util as util
 from util.visualizer import Visualizer
 import os
@@ -74,12 +75,28 @@ opt = TestOptions().parse()
 # For testing  the neural networks, manually edit/add options below
 opt.gan_mode = 'none'       # 'wgangp', 'lsgan', 'vanilla', 'none'
 
-opt.n_downsample = 2           # Downsample times
-opt.n_blocks = 2              # Numebr of residual blocks
-opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
 
 # Set the input dataset
-opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
+opt.dataset_mode = 'CelebA'   # Current dataset:  CIFAR10, CelebA
+
+if opt.dataset_mode in ['CIFAR10', 'CIFAR100']:
+    opt.n_layers_D = 3
+    opt.n_downsample = 2          # Downsample times
+    opt.n_blocks = 2              # Numebr of residual blocks
+    opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
+                    # Initial learning rate
+elif opt.dataset_mode == 'CelebA':
+    opt.n_layers_D = 3
+    opt.n_downsample = 3          # Downsample times
+    opt.n_blocks = 2              # Numebr of residual blocks
+    opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder 
+
+elif opt.dataset_mode == 'OpenImage':
+    opt.n_layers_D = 3
+    opt.n_downsample = 4          # Downsample times
+    opt.n_blocks = 2              # Numebr of residual blocks
+    opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
+
 
 # Set up the training procedure
 opt.batchSize = 1           # batch size
@@ -130,10 +147,10 @@ opt.iter_temp = 5000
 ##################################################################################################
 # Set up the training procedure
 opt.C_channel = 12
-opt.SNR = 5
+opt.SNR =0
 
 opt.is_feedback = False
-opt.feedforward = 'EXPLICIT-RES'
+opt.feedforward = 'EXPLICIT-CE-EQ'
 
 opt.N_pilot = 2         # Number of pilots for chanenl estimation
 opt.CE = 'MMSE'         # Channel Estimation Method
@@ -142,14 +159,14 @@ opt.pilot = 'ZadoffChu'      # QPSK or ZadoffChu
 
 opt.is_clip = False
 opt.CR = 0 if not opt.is_clip else 1
-opt.is_regu_PAPR = True
+opt.is_regu_PAPR = False
 opt.lam_PAPR = 0.3
 ##############################################################################################################
 
 
 ########################################  OFDM setting  ###########################################
 
-size_after_compress = (opt.size // (opt.n_downsample**2))**2 * (opt.C_channel // 2)
+size_after_compress = (opt.size // (2**opt.n_downsample))**2 * (opt.C_channel // 2)
 
 opt.N = opt.batchSize                       # Batch size
 opt.P = 1                                   # Number of symbols
@@ -165,7 +182,6 @@ opt.is_cfo_random = False
 opt.max_ang = 1.7
 opt.ang = 1.7
 
-opt.temp = 1
 if opt.CE not in ['LS', 'MMSE', 'TRUE']:
     raise Exception("Channel estimation method not implemented")
 
@@ -337,7 +353,7 @@ for i, data in enumerate(dataset):
             print('Before: PSNR: %.3f, SSIM: %.3f' % (PSNR_list[-1], SSIM_list[-1]))
             print('After: PSNR: %.3f, SSIM: %.3f' % (PSNR_refine_list[-1], SSIM_refine_list[-1]))
     '''
-    
+
     if i % 100 == 0:
         print(i)
 
