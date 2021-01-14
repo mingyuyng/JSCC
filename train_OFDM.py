@@ -14,6 +14,9 @@ import torchvision
 import torchvision.transforms as transforms
 import scipy.io as sio
 
+# Set random seed
+torch.manual_seed(0)
+np.random.seed(0)
 
 # Extract the options
 opt = TrainOptions().parse()
@@ -22,7 +25,7 @@ opt = TrainOptions().parse()
 opt.gan_mode = 'none'       # 'wgangp', 'lsgan', 'vanilla', 'none'
 
 # Set the input dataset
-opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
+opt.dataset_mode = 'CelebA'   # Current dataset:  CIFAR10, CelebA
 
 
 if opt.dataset_mode in ['CIFAR10', 'CIFAR100']:
@@ -61,17 +64,17 @@ elif opt.dataset_mode == 'OpenImage':
     opt.n_epochs = 30             # # of epochs without lr decay
     opt.n_epochs_decay = 30       # # of epochs with lr decay
     opt.lr_policy = 'linear'      # decay policy.  Availability:  see options/train_options.py
-    opt.beta1 = 0.5               # parameter for ADAM
+    opt.beta1 = 0.5               # parameter for ADAM 
     opt.lr = 5e-4
 
 
 ############################ Things recommanded to be changed ##########################################
 # Set up the training procedure
 opt.C_channel = 12
-opt.SNR = 5
+opt.SNR = 20
 
 opt.is_feedback = False
-opt.feedforward = 'EXPLICIT-RES'
+opt.feedforward = 'EXPLICIT-RES-CE'
 
 opt.N_pilot = 2              # Number of pilots for chanenl estimation
 opt.CE = 'MMSE'              # Channel Estimation Method
@@ -80,7 +83,7 @@ opt.pilot = 'ZadoffChu'      # QPSK or ZadoffChu
 
 opt.is_clip = False
 opt.CR = 0 if not opt.is_clip else 1
-opt.is_regu_PAPR = True
+opt.is_regu_PAPR = False
 opt.lam_PAPR = 0.3
 ##############################################################################################################
 
