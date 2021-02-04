@@ -293,7 +293,7 @@ class StoGANOFDMModel(BaseModel):
             self.loss_H_old = 0
             self.loss_H_new = 0
 
-        self.loss_G = self.loss_G_GAN + self.loss_G_Feat + self.loss_G_L2
+        self.loss_G = self.loss_G_GAN + self.loss_G_Feat + self.loss_G_L2 + self.loss_H_new
         if self.opt.is_regu_PAPR:
             self.loss_G += self.opt.lam_PAPR*self.loss_G_PAPR
 

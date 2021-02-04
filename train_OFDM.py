@@ -25,7 +25,7 @@ opt = TrainOptions().parse()
 opt.gan_mode = 'none'       # 'wgangp', 'lsgan', 'vanilla', 'none'
 
 # Set the input dataset
-opt.dataset_mode = 'CelebA'   # Current dataset:  CIFAR10, CelebA
+opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
 
 
 if opt.dataset_mode in ['CIFAR10', 'CIFAR100']:
@@ -48,8 +48,8 @@ elif opt.dataset_mode == 'CelebA':
     opt.n_blocks = 2              # Numebr of residual blocks
     opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
     opt.batch_size = 64
-    opt.n_epochs = 30             # # of epochs without lr decay
-    opt.n_epochs_decay = 30       # # of epochs with lr decay
+    opt.n_epochs = 20             # # of epochs without lr decay
+    opt.n_epochs_decay = 20       # # of epochs with lr decay
     opt.lr_policy = 'linear'      # decay policy.  Availability:  see options/train_options.py
     opt.beta1 = 0.5               # parameter for ADAM
     opt.lr = 5e-4
@@ -57,12 +57,12 @@ elif opt.dataset_mode == 'CelebA':
 elif opt.dataset_mode == 'OpenImage':
     opt.n_layers_D = 3
     opt.label_smooth = 1          # Label smoothing factor (for lsgan and vanilla gan only)
-    opt.n_downsample = 4          # Downsample times
-    opt.n_blocks = 2              # Numebr of residual blocks
+    opt.n_downsample = 3          # Downsample times
+    opt.n_blocks = 3              # Numebr of residual blocks
     opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
     opt.batch_size = 16
-    opt.n_epochs = 30             # # of epochs without lr decay
-    opt.n_epochs_decay = 30       # # of epochs with lr decay
+    opt.n_epochs = 20             # # of epochs without lr decay
+    opt.n_epochs_decay = 20       # # of epochs with lr decay
     opt.lr_policy = 'linear'      # decay policy.  Availability:  see options/train_options.py
     opt.beta1 = 0.5               # parameter for ADAM 
     opt.lr = 5e-4
@@ -70,11 +70,11 @@ elif opt.dataset_mode == 'OpenImage':
 
 ############################ Things recommanded to be changed ##########################################
 # Set up the training procedure
-opt.C_channel = 12
-opt.SNR = 20
+opt.C_channel = 24
+opt.SNR = 15
 
 opt.is_feedback = False
-opt.feedforward = 'EXPLICIT-RES-CE'
+opt.feedforward = 'EXPLICIT-RES'
 
 opt.N_pilot = 2              # Number of pilots for chanenl estimation
 opt.CE = 'MMSE'              # Channel Estimation Method
@@ -180,7 +180,7 @@ if opt.feedforward not in ['IMPLICIT', 'EXPLICIT-CE-EQ', 'EXPLICIT-RES', 'EXPLIC
 
 # Display setting
 opt.checkpoints_dir = './Checkpoints/' + opt.dataset_mode + '_OFDM'
-opt.name = '_C' + str(opt.C_channel) + '_' + opt.feedforward + '_SNR_' + str(opt.SNR)
+opt.name = 'C' + str(opt.C_channel) + '_' + opt.feedforward + '_SNR_' + str(opt.SNR) + '_pilot_' + str(opt.N_pilot)
 
 if opt.is_clip:
     opt.name +=  '_clip_' + str(opt.CR)

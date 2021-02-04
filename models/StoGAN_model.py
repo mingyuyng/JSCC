@@ -94,11 +94,13 @@ class StoGANModel(BaseModel):
         
         if self.opt.channel == 'awgn':   # AWGN channel
             self.latent = self.normalize(latent, 1)
+            self.latent_input = self.channel(self.latent)
         elif self.opt.channel == 'bsc':   # BSC channel
             self.latent = torch.sigmoid(latent)
-
-        # 2. Pass the channel
-        self.latent_input = self.channel(self.latent)
+            self.latent_input = self.channel(self.latent)
+        elif self.opt.channel == 'none':
+            self.latent = torch.sigmoid(latent)
+            self.latent_input = self.latent
 
         # 3. Reconstruction
         self.fake = self.netG(self.latent_input)
@@ -108,8 +110,7 @@ class StoGANModel(BaseModel):
         # Fake; stop backprop to the generator by detaching fake_B
         
         _, pred_fake = self.netD(self.fake.detach())
-        self.loss_D_fake = self.criterionGAN(pred_fake, False)
-        
+        self.loss_D_fake = self.criterionGAN(pred_fake, False)        
         real_data = self.real_B
         _, pred_real = self.netD(real_data)
         self.loss_D_real = self.criterionGAN(pred_real, True)

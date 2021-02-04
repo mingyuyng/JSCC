@@ -244,9 +244,9 @@ class GANLoss(nn.Module):
         """
 
         if target_is_real:
-            target_tensor = self.real_label
+            target_tensor = self.real_label.to(torch.float32)
         else:
-            target_tensor = self.fake_label
+            target_tensor = self.fake_label.to(torch.float32)
         return target_tensor.expand_as(prediction)
 
     def __call__(self, prediction, target_is_real):
@@ -1011,9 +1011,13 @@ class DC_Generator(torch.nn.Module):
             nn.ConvTranspose2d(in_channels=512, out_channels=256, kernel_size=4, stride=2, padding=1, bias=use_bias),
             norm_layer(256),
             activation,
+            
+            nn.ConvTranspose2d(in_channels=256, out_channels=128, kernel_size=4, stride=2, padding=1, bias=use_bias),
+            norm_layer(128),
+            activation,
 
             # State (256x16x16)
-            nn.ConvTranspose2d(in_channels=256, out_channels=channels, kernel_size=4, stride=2, padding=1))
+            nn.ConvTranspose2d(in_channels=128, out_channels=channels, kernel_size=4, stride=2, padding=1))
             # output of main module --> Image (Cx32x32)
 
         self.output = nn.Tanh()
@@ -1041,19 +1045,25 @@ class DC_Discriminator(torch.nn.Module):
 
         self.main_module = nn.Sequential(
             # Image (Cx32x32)
-            nn.Conv2d(in_channels=channels, out_channels=256, kernel_size=4, stride=2, padding=1, bias=use_bias),
-            norm_layer(256),
+            nn.Conv2d(in_channels=channels, out_channels=128, kernel_size=4, stride=2, padding=1, bias=use_bias),
+            norm_layer(128),
             activation,
 
             # State (256x16x16)
+            nn.Conv2d(in_channels=128, out_channels=256, kernel_size=4, stride=2, padding=1, bias=use_bias),
+            norm_layer(256),
+            activation,
+
+            # State (512x8x8)
             nn.Conv2d(in_channels=256, out_channels=512, kernel_size=4, stride=2, padding=1, bias=use_bias),
             norm_layer(512),
             activation,
 
-            # State (512x8x8)
             nn.Conv2d(in_channels=512, out_channels=1024, kernel_size=4, stride=2, padding=1, bias=use_bias),
             norm_layer(1024),
-            activation)
+            activation
+
+            )
             # outptut of main module --> State (1024x4x4)
 
         self.output = nn.Sequential(
