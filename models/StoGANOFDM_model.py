@@ -183,6 +183,7 @@ class StoGANOFDMModel(BaseModel):
             self.H_est = self.channel_estimation(out_pilot, noise_pwr)
             self.rx = self.equalization(self.H_est, out_sig, noise_pwr)
             r1 = self.rx
+            self.H_est_new = self.H_est
             dec_in = r1.contiguous().permute(0,1,2,4,3).contiguous().view(N, -1, H, W)
             self.fake = self.netG(dec_in)
 
@@ -293,7 +294,11 @@ class StoGANOFDMModel(BaseModel):
             self.loss_H_old = 0
             self.loss_H_new = 0
 
-        self.loss_G = self.loss_G_GAN + self.loss_G_Feat + self.loss_G_L2 + self.loss_H_new
+        self.loss_G = self.loss_G_GAN + self.loss_G_Feat + self.loss_G_L2
+
+        if self.opt.is_hloss:
+            self.loss_G += self.opt.lam_h * self.loss_H_new
+
         if self.opt.is_regu_PAPR:
             self.loss_G += self.opt.lam_PAPR*self.loss_G_PAPR
 

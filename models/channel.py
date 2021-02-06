@@ -376,14 +376,14 @@ class OFDM_channel(nn.Module):
 
             with torch.no_grad():
                 pwr_pre = torch.mean(x**2, (-2,-1), True) * 2
-
+            
             x = self.clip(x)
 
             with torch.no_grad():
                 pwr = torch.mean(x**2, (-2,-1), True) * 2
-                alpha = torch.sqrt(pwr_pre/2)/torch.sqrt(pwr)
-
-            x = alpha*x
+                alpha = torch.sqrt(pwr_pre/2)/torch.sqrt(pwr/2)
+            
+            x = alpha*x            
 
         PAPR = self.PAPR(x)
         
