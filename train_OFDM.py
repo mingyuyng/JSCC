@@ -22,10 +22,10 @@ np.random.seed(0)
 opt = TrainOptions().parse()
 
 # For testing  the neural networks, manually edit/add options below
-opt.gan_mode = 'none'       # 'wgangp', 'lsgan', 'vanilla', 'none'
+opt.gan_mode = 'lsgan'       # 'wgangp', 'lsgan', 'vanilla', 'none'
 
 # Set the input dataset
-opt.dataset_mode = 'CIFAR10'   # Current dataset:  CIFAR10, CelebA
+opt.dataset_mode = 'OpenImage'   # Current dataset:  CIFAR10, CelebA
 
 
 if opt.dataset_mode in ['CIFAR10', 'CIFAR100']:
@@ -39,7 +39,7 @@ if opt.dataset_mode in ['CIFAR10', 'CIFAR100']:
     opt.n_epochs_decay = 200      # # of epochs with lr decay
     opt.lr_policy = 'linear'      # decay policy.  Availability:  see options/train_options.py
     opt.beta1 = 0.5               # parameter for ADAM
-    opt.lr = 1e-4                 # Initial learning rate
+    opt.lr = 5e-4                 # Initial learning rate
 
 elif opt.dataset_mode == 'CelebA':
     opt.n_layers_D = 3
@@ -48,43 +48,49 @@ elif opt.dataset_mode == 'CelebA':
     opt.n_blocks = 2              # Numebr of residual blocks
     opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
     opt.batch_size = 64
+    opt.n_epochs = 25             # # of epochs without lr decay
+    opt.n_epochs_decay = 25       # # of epochs with lr decay
+    opt.lr_policy = 'linear'      # decay policy.  Availability:  see options/train_options.py
+    opt.beta1 = 0.5               # parameter for ADAM
+    opt.lr = 5e-4
+    opt.save_latest_freq = 20000
+
+elif opt.dataset_mode == 'OpenImage':
+    opt.n_layers_D = 4
+    opt.label_smooth = 1          # Label smoothing factor (for lsgan and vanilla gan only)
+    opt.n_downsample = 3          # Downsample times
+    opt.n_blocks = 4              # Numebr of residual blocks
+    opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
+    opt.batch_size = 16
     opt.n_epochs = 20             # # of epochs without lr decay
     opt.n_epochs_decay = 20       # # of epochs with lr decay
     opt.lr_policy = 'linear'      # decay policy.  Availability:  see options/train_options.py
     opt.beta1 = 0.5               # parameter for ADAM
     opt.lr = 5e-4
 
-elif opt.dataset_mode == 'OpenImage':
-    opt.n_layers_D = 3
-    opt.label_smooth = 1          # Label smoothing factor (for lsgan and vanilla gan only)
-    opt.n_downsample = 3          # Downsample times
-    opt.n_blocks = 3              # Numebr of residual blocks
-    opt.first_kernel = 5          # The filter size of the first convolutional layer in encoder
-    opt.batch_size = 16
-    opt.n_epochs = 20             # # of epochs without lr decay
-    opt.n_epochs_decay = 20       # # of epochs with lr decay
-    opt.lr_policy = 'linear'      # decay policy.  Availability:  see options/train_options.py
-    opt.beta1 = 0.5               # parameter for ADAM 
-    opt.lr = 5e-4
-
 
 ############################ Things recommanded to be changed ##########################################
 # Set up the training procedure
 opt.C_channel = 24
-opt.SNR = 15
+opt.SNR = 5
 
 opt.is_feedback = False
 opt.feedforward = 'EXPLICIT-RES'
 
-opt.N_pilot = 2              # Number of pilots for chanenl estimation
+opt.N_pilot = 1              # Number of pilots for chanenl estimation
 opt.CE = 'MMSE'              # Channel Estimation Method
 opt.EQ = 'MMSE'              # Equalization Method
 opt.pilot = 'ZadoffChu'      # QPSK or ZadoffChu
 
 opt.is_clip = False
-opt.CR = 0 if not opt.is_clip else 1
+opt.CR = 0 if not opt.is_clip else 1.2
 opt.is_regu_PAPR = False
-opt.lam_PAPR = 0.3
+opt.lam_PAPR = 0.1
+
+opt.lam_h = 0.5
+opt.is_hloss = True
+opt.is_random = False
+opt.lam_G = 0.05
 ##############################################################################################################
 
 # Set up the loss function
@@ -127,7 +133,7 @@ elif opt.dataset_mode == 'CIFAR100':
          transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))])
 
     trainset = torchvision.datasets.CIFAR100(root='./data', train=True,
-                                            download=True, transform=transform)
+                                             download=True, transform=transform)
     dataset = torch.utils.data.DataLoader(trainset, batch_size=opt.batchsize,
                                           shuffle=True, num_workers=2, drop_last=True)
     dataset_size = len(dataset)
@@ -163,6 +169,7 @@ opt.L = 8                                   # Number of paths
 opt.decay = 4
 opt.S = size_after_compress // opt.M        # Number of packets
 
+
 opt.is_cfo = False
 opt.is_trick = True
 opt.is_cfo_random = False
@@ -180,14 +187,19 @@ if opt.feedforward not in ['IMPLICIT', 'EXPLICIT-CE-EQ', 'EXPLICIT-RES', 'EXPLIC
 
 # Display setting
 opt.checkpoints_dir = './Checkpoints/' + opt.dataset_mode + '_OFDM'
-opt.name = 'C' + str(opt.C_channel) + '_' + opt.feedforward + '_SNR_' + str(opt.SNR) + '_pilot_' + str(opt.N_pilot)
+opt.name = 'C' + str(opt.C_channel) + '_' + opt.feedforward + '_SNR_' + str(opt.SNR) + '_pilot_' + str(opt.N_pilot) + '_' + str(opt.is_hloss)
 
 if opt.is_clip:
-    opt.name +=  '_clip_' + str(opt.CR)
+    opt.name += '_clip_' + str(opt.CR)
 
 if opt.is_regu_PAPR:
-    opt.name +=  '_PAPRnet_' + str(opt.lam_PAPR)
-   
+    opt.name += '_PAPRnet_' + str(opt.lam_PAPR)
+
+if opt.is_random:
+    opt.name += '_random'
+
+if opt.gan_mode in ['lsgan', 'vanilla', 'wgangp']:
+    opt.name += f'_{opt.gan_mode}_{opt.lam_G}'
 
 opt.display_env = opt.dataset_mode + '_OFDM_' + opt.name
 
@@ -219,7 +231,7 @@ for epoch in range(opt.epoch_count, opt.n_epochs + opt.n_epochs_decay + 1):    #
 
         if opt.dataset_mode in ['CIFAR10', 'CIFAR100']:
             input = data[0]
-        elif opt.dataset_mode == 'CelebA': 
+        elif opt.dataset_mode == 'CelebA':
             input = data['data']
         elif opt.dataset_mode == 'OpenImage':
             input = data['data']
@@ -227,7 +239,7 @@ for epoch in range(opt.epoch_count, opt.n_epochs + opt.n_epochs_decay + 1):    #
         model.set_input(input)         # unpack data from dataset and apply preprocessing
         model.optimize_parameters()   # calculate loss functions, get gradients, update network weights
         #count += 1
-        #model.update_temp(count)
+        # model.update_temp(count)
 
         if total_iters % opt.display_freq == 0:   # display images on visdom and save images to a HTML file
             save_result = total_iters % opt.update_html_freq == 0

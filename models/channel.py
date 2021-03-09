@@ -350,7 +350,7 @@ class OFDM_channel(nn.Module):
         power = torch.mean(x**2, (-2,-1))*2
         max_pwr, _ = torch.max(torch.sum(x**2, -1), -1)
 
-        return 10*torch.log10(max_pwr/power)
+        return max_pwr/power
 
 
     def forward(self, x, SNR, cof=None, norm=True):
@@ -371,7 +371,7 @@ class OFDM_channel(nn.Module):
         # Reshape:
         x = x.view(N, self.opt.P, self.opt.S*(self.opt.M+self.opt.K), 2)
         pilot = self.pilot_cp.repeat(N,1,1,1,1).view(N, self.opt.P, self.opt.N_pilot*(self.opt.M+self.opt.K), 2)
-        
+                
         if self.opt.is_clip:
 
             with torch.no_grad():
@@ -692,7 +692,7 @@ class plain_channel(nn.Module):
         M = tx.shape[1]
 
         # Normalize the input power in the frequency domain
-        tx, _ = Normalize(tx, pwr=self.pwr)
+        tx = Normalize(tx, pwr=self.pwr)
         
         y = self.channel(tx, None)
         

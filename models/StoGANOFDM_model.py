@@ -9,6 +9,7 @@ from .base_model import BaseModel
 from . import networks
 from . import channel
 import scipy.io as sio
+import random
 
 class StoGANOFDMModel(BaseModel):
 
@@ -160,7 +161,13 @@ class StoGANOFDMModel(BaseModel):
 
         self.tx = latent.view(N, self.opt.P, self.opt.S, 2, self.opt.M).permute(0,1,2,4,3)
         # Normalization is contained in the channel
-        out_pilot, out_sig, self.H_true, noise_pwr, self.PAPR = self.channel(self.tx, SNR=self.opt.SNR, cof=cof)
+
+        if self.opt.is_random:
+            SNR = random.uniform(0,20)
+            out_pilot, out_sig, self.H_true, noise_pwr, self.PAPR = self.channel(self.tx, SNR=SNR, cof=cof)
+        else:
+            out_pilot, out_sig, self.H_true, noise_pwr, self.PAPR = self.channel(self.tx, SNR=self.opt.SNR, cof=cof)
+
         N, C, H, W = latent.shape
 
         self.out_sig = out_sig
@@ -265,9 +272,9 @@ class StoGANOFDMModel(BaseModel):
 
         if self.opt.gan_mode != 'none':
             feat_fake, pred_fake = self.netD(self.fake)
-            self.loss_G_GAN = self.criterionGAN(pred_fake, True)
+            self.loss_G_GAN = self.opt.lam_G * self.criterionGAN(pred_fake, True)
 
-            if self.is_Feat:
+            if self.opt.is_Feat:
                 feat_real, pred_real = self.netD(self.real_B)
                 self.loss_G_Feat = 0
 
